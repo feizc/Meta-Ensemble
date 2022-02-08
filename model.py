@@ -1,3 +1,4 @@
+from modulefinder import Module
 import torch
 import torch.nn as nn
 from torch.hub import load_state_dict_from_url
@@ -232,3 +233,34 @@ class FeedForward(nn.Module):
         out = self.dropout(out)
         out = self.layer_norm(input + out) 
         return out 
+
+
+# module name can not contain "."
+def module_name_refine(module_name): 
+    module_name = module_name.split('.')
+    refine_module_name = ''
+    for seg in module_name: 
+        refine_module_name += seg 
+    return refine_module_name
+
+
+class ParameterProject(nn.Module): 
+    # project base learner to paramer distillation 
+    def __init__(self, weight_size_dict):
+        super(ParameterProject, self).__init__() 
+        self.models = nn.ModuleDict()
+
+        for key in weight_size_dict: 
+            self.models[module_name_refine(key)] = nn.Linear(weight_size_dict[key][1], weight_size_dict[key][1]//2)
+    
+    def forward(self, combine_weight_dict): 
+        for key in combine_weight_dict.keys(): 
+            combine_weight_dict[key] = self.models[module_name_refine(key)](combine_weight_dict[key]) 
+        return combine_weight_dict
+
+
+        
+    
+
+
+

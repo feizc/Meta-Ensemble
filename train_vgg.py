@@ -12,9 +12,11 @@ from model import vgg11_bn
 
 batch_size = 64
 epochs = 200
-ckpt_path = 'ckpt/vgg11_bn.pth'
+pretrain_path = 'ckpt/vgg11_bn.pth'
 save_path = 'ckpt/best.pth' 
 OUTPUT_DIM = 10
+load_pretrain = True 
+load_ckpt = False 
 
 
 SEED = 2021
@@ -68,19 +70,24 @@ def train():
     device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu") 
 
     model = vgg11_bn() 
-    state_dict = torch.load(ckpt_path, map_location=None) 
-    model.load_state_dict(state_dict) 
+    if load_pretrain == True:
+        state_dict = torch.load(pretrain_path, map_location=None) 
+        model.load_state_dict(state_dict) 
     IN_FEATURES = model.classifier[-1].in_features
     final_fc = nn.Linear(IN_FEATURES, OUTPUT_DIM) 
     model.classifier[-1] = final_fc 
-    
+
+    if load_ckpt == True: 
+        state_dict = torch.load(save_path, map_location=None) 
+        model.load_state_dict(state_dict) 
+    model = model.to(device)
     # freeze parameter
     #for parameter in model.classifier[:-1].parameters():
     #    parameter.requires_grad = False
 
     loss_fn = nn.CrossEntropyLoss() 
     #optimizer = torch.optim.SGD(model.parameters(), lr=0.01,  momentum=0.9) 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
     
     #optimizer = torch.optim.SGD(model.parameters(), lr=0.01,
     #                  momentum=0.9, weight_decay=5e-4)

@@ -4,6 +4,8 @@ from torch.nn.modules.module import Module
 from model import vgg11_bn 
 import copy 
 from torchvision import datasets, transforms  
+from tqdm import tqdm 
+
 
 
 class VggEnsemble(nn.Module): 
@@ -21,6 +23,7 @@ class VggEnsemble(nn.Module):
             out_i = self.models[i](image) 
             out_ensemble.append(out_i.unsqueeze(0)) 
         return torch.mean(torch.cat(out_ensemble, 0), dim=0)
+
 
 
 if __name__ == '__main__':  
@@ -44,14 +47,27 @@ if __name__ == '__main__':
     test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform) 
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
                                           shuffle=False) # num_workers=2 
-    
-    for it, (image, label) in enumerate(test_loader): 
-        image, label = image.to(device), label.to(device) 
-        # print(image.size(), label.size()) 
-        with torch.no_grad(): 
-            out = ensemble_model(image) 
-        print(out.size()) # (bsz, class) 
-        
+
+    ensemble_model.eval() 
+    acc = .0 
+    time_stamp = 0 
+    with tqdm(desc='Ensemble evaluation', unit='it', total=len(test_loader)) as pbar:
+        for it, (image, label) in enumerate(test_loader): 
+            image, label = image.to(device), label.to(device) 
+            # print(image.size(), label.size()) 
+            with torch.no_grad(): 
+                out = ensemble_model(image) 
+                # print(out.size()) # (bsz, class) 
+                predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
+                acc += (predict_y == label).sum().item() / predict_y.size(0)
+        pbar.set_postfix(acc=acc / (it + 1))
+        pbar.update() 
+        time_stamp += 1 
+                #if it == 20:
+                #    break 
+        # scheduler.step()
+        val_acc = acc / time_stamp
+        print(val_acc) 
 
 
 
