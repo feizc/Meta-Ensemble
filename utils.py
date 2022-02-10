@@ -1,5 +1,6 @@
 import pickle 
-from PIL import Image 
+from PIL import Image
+from zmq import device 
 from model import vgg11_bn 
 from torch import nn 
 import torch 
@@ -47,7 +48,7 @@ def weight_size_dict_generate(weight_dict):
 
 
 # combine the model weights in one dict 
-def parameter_dict_combine(weight_dict_list): 
+def parameter_dict_combine(weight_dict_list, device): 
     combine_weight_dict = {} 
     weight_size_dict = {}
 
@@ -65,19 +66,19 @@ def parameter_dict_combine(weight_dict_list):
         for i in range(1, len(weight_dict_list)): 
             t_weight_matrix = weight_dict_list[i][key]
             t_weight_matrix = t_weight_matrix.view(out_dim, -1)
-            weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=-1) 
+            weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=-1).to(device)
         
         combine_weight_dict[key] = weight_matrix 
     return combine_weight_dict, weight_size_dict 
  
 
  # resize the weight dict for model loading 
-def weight_resize_for_model_load(weight_dict, original_weight_dict): 
+def weight_resize_for_model_load(weight_dict, original_weight_dict, device): 
     for key in original_weight_dict.keys(): 
         if key in weight_dict.keys():
-            weight_dict[key] = weight_dict[key].view(original_weight_dict[key].size())
+            weight_dict[key] = weight_dict[key].view(original_weight_dict[key].size()).to(device)
         else:
-            weight_dict[key] = original_weight_dict[key]
+            weight_dict[key] = original_weight_dict[key].to(device)
     return weight_dict
     
 
