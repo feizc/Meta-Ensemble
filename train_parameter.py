@@ -4,6 +4,7 @@ from torch import nn
 from tqdm import tqdm 
 from model import ParameterProject 
 from utils import parameter_dict_combine, weight_dict_print, weight_size_dict_generate, weight_resize_for_model_load
+from utils import weight_detach
 from model import vgg11_bn  
 
 batch_size = 8 
@@ -77,9 +78,10 @@ def train():
             for it, (image, label) in enumerate(train_loader):
                 image, label = image.to(device), label.to(device) 
                 optimizer.zero_grad() 
-
-                combine_weight_dict, _ = parameter_dict_combine(weight_dict_list, device)
-                generated_weight_dict = parameter_predict_model(combine_weight_dict)
+                new_combine_weight_dict = weight_detach(combine_weight_dict)
+                # combine_weight_dict, _ = parameter_dict_combine(weight_dict_list, device)
+                # weight_dict_print(combine_weight_dict)
+                generated_weight_dict = parameter_predict_model(new_combine_weight_dict)
                 generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device) 
                 # model parameter load
                 vgg_model.load_state_dict(generated_weight_dict) 
@@ -95,12 +97,12 @@ def train():
             
     
         # 5. validation 
-        parameter_predict_model.train() 
+        parameter_predict_model.eval() 
         acc = .0 
         time_stamp = 0
         with tqdm(desc='Epoch %d - evaluation' % epoch, unit='it', total=len(test_loader)) as pbar:
-            combine_weight_dict, _ = parameter_dict_combine(weight_dict_list, device)
-            generated_weight_dict = parameter_predict_model(combine_weight_dict)
+            new_combine_weight_dict = weight_detach(combine_weight_dict)
+            generated_weight_dict = parameter_predict_model(new_combine_weight_dict)
             generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device) 
             # model parameter load
             vgg_model.load_state_dict(generated_weight_dict) 

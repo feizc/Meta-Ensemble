@@ -57,8 +57,10 @@ def parameter_dict_combine(weight_dict_list, device):
 
     for key in weight_dict_list[0].keys(): 
         if 'classifier' in key:
-            break
+            break 
         weight_matrix = weight_dict_list[0][key] 
+        if len(weight_matrix.size()) < 1:
+            weight_matrix = weight_matrix.unsqueeze(0)
         out_dim = weight_matrix.size()[0] 
         weight_size_dict[key] = weight_matrix.size()
         weight_matrix = weight_matrix.view(out_dim, -1)
@@ -80,7 +82,13 @@ def weight_resize_for_model_load(weight_dict, original_weight_dict, device):
         else:
             weight_dict[key] = original_weight_dict[key].to(device)
     return weight_dict
-    
+
+# weight detach 
+def weight_detach(weight_dict): 
+    new_weight_dict = {} 
+    for key in weight_dict.keys(): 
+        new_weight_dict[key] = weight_dict[key].clone().detach() 
+    return new_weight_dict
 
 
 

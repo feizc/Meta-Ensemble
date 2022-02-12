@@ -255,6 +255,8 @@ class ParameterProject(nn.Module):
     
     def forward(self, combine_weight_dict): 
         for key in combine_weight_dict.keys(): 
+            #print(self.models[module_name_refine(key)])
+            #print(key, combine_weight_dict[key].size())
             combine_weight_dict[key] = self.models[module_name_refine(key)](combine_weight_dict[key]) 
         return combine_weight_dict
 
