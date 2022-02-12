@@ -67,6 +67,7 @@ def meta_loss(generated_weight_dict, target_weight_dict):
     return loss
 
 
+# train for total/ only fc 
 def train_base(base_model): 
     
     # dataset 
