@@ -1,4 +1,3 @@
-from pyexpat import model
 import torch 
 from torchvision import datasets, transforms 
 from torch import nn 
