@@ -64,7 +64,5 @@ def meta_loss(generated_weight_dict, target_weight_dict):
     return loss 
 
 
-
-
 if __name__ == '__main__': 
     train() 
