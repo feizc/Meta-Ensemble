@@ -48,7 +48,7 @@ def weight_size_dict_generate(weight_dict):
 
 
 # combine the model weights in one dict 
-def parameter_dict_combine(weight_dict_list, device): 
+def parameter_dict_combine(weight_dict_list, device, mode='linear'): 
     combine_weight_dict = {} 
     weight_size_dict = {}
 
@@ -56,8 +56,8 @@ def parameter_dict_combine(weight_dict_list, device):
         return combine_weight_dict, weight_size_dict 
 
     for key in weight_dict_list[0].keys(): 
-        if 'classifier' in key:
-            break 
+        if 'features.0.weight' not in key:
+            continue
         weight_matrix = weight_dict_list[0][key] 
         if len(weight_matrix.size()) < 1:
             weight_matrix = weight_matrix.unsqueeze(0)
@@ -67,8 +67,11 @@ def parameter_dict_combine(weight_dict_list, device):
         
         for i in range(1, len(weight_dict_list)): 
             t_weight_matrix = weight_dict_list[i][key]
-            t_weight_matrix = t_weight_matrix.view(out_dim, -1)
-            weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=-1).to(device)
+            t_weight_matrix = t_weight_matrix.view(out_dim, -1) 
+            if mode == 'transformer': 
+                weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=0).to(device)
+            else:
+                weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=-1).to(device)
         
         combine_weight_dict[key] = weight_matrix 
     return combine_weight_dict, weight_size_dict 

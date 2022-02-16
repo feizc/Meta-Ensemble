@@ -76,7 +76,7 @@ def train():
     IN_FEATURES = model.classifier[-1].in_features
     final_fc = nn.Linear(IN_FEATURES, OUTPUT_DIM) 
     model.classifier[-1] = final_fc 
-
+    
     if load_ckpt == True: 
         state_dict = torch.load(save_path, map_location=None) 
         model.load_state_dict(state_dict) 

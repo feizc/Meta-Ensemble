@@ -12,7 +12,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 meta_epochs = 200
 base_epochs = 8 
 batch_size = 8
-save_path = 'ckpt/parameter_predictor_best.pth' 
+save_path = 'ckpt/linear_parameter_predictor_best.pth' 
+# analyze how many ratio for training 
+few_shot_flag = True 
 
 
 def train(): 
@@ -66,6 +68,7 @@ def meta_loss(generated_weight_dict, target_weight_dict):
     return loss
 
 
+
 # train for total/ only fc 
 def train_base(base_model): 
     
@@ -109,26 +112,10 @@ def train_base(base_model):
     for epoch in range(base_epochs): 
         
         # validation the parameter prediction performance 
-        acc = .0 
-        time_stamp = 0 
-        base_model.eval() 
-        with tqdm(desc='Epoch %d - evaluation' % epoch, unit='it', total=len(test_loader)) as pbar:
-            for it, (image, label) in enumerate(test_loader): 
-                image, label = image.to(device), label.to(device) 
-                with torch.no_grad(): 
-                    out = base_model(image) # (bsz, vob)
-                    predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
-                    acc += (predict_y == label).sum().item() / predict_y.size(0)
-                pbar.set_postfix(acc=acc / (it + 1))
-                pbar.update() 
-                time_stamp += 1 
-                break 
-        val_acc = acc / time_stamp
-        print(val_acc) 
-
 
         base_model.train()
         running_loss = 0.0 
+        total_part_num = len(train_loader) // 10 
         with tqdm(desc='Epoch %d - train' % epoch, unit='it', total=len(train_loader)) as pbar: 
             for it, (image, label) in enumerate(train_loader):
                 image, label = image.to(device), label.to(device) 
@@ -142,10 +129,36 @@ def train_base(base_model):
                 running_loss += loss.item() 
                 pbar.set_postfix(loss=running_loss / (it + 1))
                 pbar.update() 
+                if few_shot_flag == True: 
+                    if it % total_part_num == 0: 
+                        print('Train set partial: ', it // total_part_num) 
+                        print('\n')
+                        valid_base(base_model, test_loader, epoch)
                 break 
         break
     
     return base_model.state_dict()
+
+
+
+def valid_base(base_model, test_loader, epoch):
+    acc = .0 
+    time_stamp = 0 
+    base_model.eval() 
+    with tqdm(desc='Epoch %d - evaluation' % epoch, unit='it', total=len(test_loader)) as pbar:
+        for it, (image, label) in enumerate(test_loader): 
+            image, label = image.to(device), label.to(device) 
+            with torch.no_grad(): 
+                out = base_model(image) # (bsz, vob)
+                predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
+                acc += (predict_y == label).sum().item() / predict_y.size(0)
+            pbar.set_postfix(acc=acc / (it + 1))
+            pbar.update() 
+            time_stamp += 1 
+            break 
+        val_acc = acc / time_stamp
+        print(val_acc) 
+        print('\n')
 
 
 if __name__ == '__main__': 
