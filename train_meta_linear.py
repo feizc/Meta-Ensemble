@@ -7,7 +7,7 @@ from model import ParameterProject
 from utils import parameter_dict_combine, weight_dict_print, weight_detach,\
                     weight_size_dict_generate, weight_resize_for_model_load
 from model import vgg11_bn 
-
+from utils import cifa10_data_load
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
@@ -47,6 +47,7 @@ def train():
         
         target_weight_dict = train_base(base_model) 
 
+        
         for t in range(base_epochs): 
             
             new_combine_weight_dict = weight_detach(combine_weight_dict)
@@ -58,16 +59,42 @@ def train():
             meta_optimizer.step() 
             print('meta loss:', loss.item()) 
             # print(parameter_predict_model.state_dict())
+        
+        combine_tuning(parameter_predict_model, base_model, combine_weight_dict, weight_dict_list)
         torch.save(parameter_predict_model.state_dict(), save_path) 
     
 
 
 # jointly training tuning for performance boosting 
-def combine_tuning(parameter_predict_model, base_model): 
+def combine_tuning(parameter_predict_model, base_model, combine_weight_dict, weight_dict_list): 
     train_loader, test_loader = cifa10_data_load() 
     meta_optimizer = torch.optim.SGD(parameter_predict_model.parameters(), lr=0.1, momentum=0.9) 
 
-    return base_model
+    for epoch in range(base_epochs): 
+        parameter_predict_model.train() 
+        new_combine_weight_dict = weight_detach(combine_weight_dict)
+        generated_weight_dict = parameter_predict_model(new_combine_weight_dict) 
+        generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device)
+        
+        base_model.load_state_dict(generated_weight_dict) 
+
+        loss_fn = nn.CrossEntropyLoss() 
+        running_loss = 0.0
+        with tqdm(desc='Epoch %d - train' % epoch, unit='it', total=len(train_loader)) as pbar: 
+            for it, (image, label) in enumerate(train_loader):
+                image, label = image.to(device), label.to(device) 
+                meta_optimizer.zero_grad() 
+
+                out = base_model(image) 
+                loss = loss_fn(out, label) 
+                loss.backward() 
+                meta_optimizer.step()
+
+                running_loss += loss.item() 
+                pbar.set_postfix(loss=running_loss / (it + 1))
+                pbar.update() 
+                break 
+        break
 
 
 
@@ -147,42 +174,6 @@ def valid_base(base_model, test_loader, epoch):
         print(val_acc) 
         print('\n')
 
-
-def cifa10_data_load():
-    # dataset 
-    pretrained_size = 224
-    pretrained_means = [0.485, 0.456, 0.406]
-    pretrained_stds = [0.229, 0.224, 0.225]
-
-    train_transform = transforms.Compose([
-                               transforms.Resize(pretrained_size),
-                               transforms.RandomRotation(5),
-                               transforms.RandomHorizontalFlip(0.5),
-                               transforms.RandomCrop(pretrained_size, padding=10),
-                               transforms.ToTensor(),
-                               transforms.Normalize(mean=pretrained_means,
-                                                    std=pretrained_stds)
-                        ])
-
-    test_transform = transforms.Compose([
-                               transforms.Resize(pretrained_size),
-                               transforms.ToTensor(),
-                               transforms.Normalize(mean=pretrained_means,
-                                                    std=pretrained_stds)
-                        ])
-
-    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                              shuffle=True) 
-    
-    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
-                                              shuffle=False) # num_workers=2 
-
-    classes = ('plane', 'car', 'bird', 'cat',
-               'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
-
-    return train_loader, test_loader
 
 
 
