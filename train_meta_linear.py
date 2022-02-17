@@ -1,3 +1,4 @@
+from appscript import con
 import torch 
 from torchvision import datasets, transforms 
 from torch import nn 
@@ -47,19 +48,35 @@ def train():
         target_weight_dict = train_base(base_model) 
 
         for t in range(base_epochs): 
-            meta_optimizer.zero_grad() 
+            
+            new_combine_weight_dict = weight_detach(combine_weight_dict)
+            generated_weight_dict = parameter_predict_model(new_combine_weight_dict) 
+            generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device)
             loss = meta_loss(generated_weight_dict, target_weight_dict) 
+            meta_optimizer.zero_grad() 
             loss.backward() 
             meta_optimizer.step() 
             print('meta loss:', loss.item()) 
+            # print(parameter_predict_model.state_dict())
         torch.save(parameter_predict_model.state_dict(), save_path) 
     
+
+
+# jointly training tuning for performance boosting 
+def combine_tuning(parameter_predict_model, base_model): 
+    train_loader, test_loader = cifa10_data_load() 
+    meta_optimizer = torch.optim.SGD(parameter_predict_model.parameters(), lr=0.1, momentum=0.9) 
+
+    return base_model
+
 
 
 def meta_loss(generated_weight_dict, target_weight_dict): 
     begin_flag = True 
     mse_loss = nn.MSELoss()
     for key in generated_weight_dict: 
+        if 'features.0.weight' not in key: 
+            continue 
         if begin_flag == True: 
             loss = mse_loss(generated_weight_dict[key].float(), target_weight_dict[key].float()) 
             begin_flag = False 
@@ -71,40 +88,10 @@ def meta_loss(generated_weight_dict, target_weight_dict):
 
 # train for total/ only fc 
 def train_base(base_model): 
-    
+
     # dataset 
-    pretrained_size = 224
-    pretrained_means = [0.485, 0.456, 0.406]
-    pretrained_stds = [0.229, 0.224, 0.225]
-
-    train_transform = transforms.Compose([
-                               transforms.Resize(pretrained_size),
-                               transforms.RandomRotation(5),
-                               transforms.RandomHorizontalFlip(0.5),
-                               transforms.RandomCrop(pretrained_size, padding=10),
-                               transforms.ToTensor(),
-                               transforms.Normalize(mean=pretrained_means,
-                                                    std=pretrained_stds)
-                        ])
-
-    test_transform = transforms.Compose([
-                               transforms.Resize(pretrained_size),
-                               transforms.ToTensor(),
-                               transforms.Normalize(mean=pretrained_means,
-                                                    std=pretrained_stds)
-                        ])
-
-    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                              shuffle=True) 
+    train_loader, test_loader = cifa10_data_load()
     
-    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
-                                              shuffle=False) # num_workers=2 
-
-    classes = ('plane', 'car', 'bird', 'cat',
-               'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
-
     base_optimizer = torch.optim.Adam(base_model.parameters(), lr=0.0001) 
     loss_fn = nn.CrossEntropyLoss() 
 
@@ -159,6 +146,44 @@ def valid_base(base_model, test_loader, epoch):
         val_acc = acc / time_stamp
         print(val_acc) 
         print('\n')
+
+
+def cifa10_data_load():
+    # dataset 
+    pretrained_size = 224
+    pretrained_means = [0.485, 0.456, 0.406]
+    pretrained_stds = [0.229, 0.224, 0.225]
+
+    train_transform = transforms.Compose([
+                               transforms.Resize(pretrained_size),
+                               transforms.RandomRotation(5),
+                               transforms.RandomHorizontalFlip(0.5),
+                               transforms.RandomCrop(pretrained_size, padding=10),
+                               transforms.ToTensor(),
+                               transforms.Normalize(mean=pretrained_means,
+                                                    std=pretrained_stds)
+                        ])
+
+    test_transform = transforms.Compose([
+                               transforms.Resize(pretrained_size),
+                               transforms.ToTensor(),
+                               transforms.Normalize(mean=pretrained_means,
+                                                    std=pretrained_stds)
+                        ])
+
+    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                              shuffle=True) 
+    
+    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                              shuffle=False) # num_workers=2 
+
+    classes = ('plane', 'car', 'bird', 'cat',
+               'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
+
+    return train_loader, test_loader
+
 
 
 if __name__ == '__main__': 

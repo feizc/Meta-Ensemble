@@ -27,6 +27,7 @@ class VggEnsemble(nn.Module):
 
 
 if __name__ == '__main__':  
+    
     batch_size = 16
     device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu") 
 
