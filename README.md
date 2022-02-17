@@ -1,3 +1,3 @@
-# EPD: Ensemble parameter distillation
+# EPD: Ensemble Parameter Distillation
  
-We aim to predict the parameter of ensemble model. 
+We aim to predict the parameter of ensembled single model based on the base learners and dataset. 
