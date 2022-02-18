@@ -1,4 +1,3 @@
-from appscript import con
 import torch 
 from torchvision import datasets, transforms 
 from torch import nn 
@@ -18,7 +17,8 @@ save_path = 'ckpt/linear_parameter_predictor_best.pth'
 few_shot_flag = True 
 
 
-def train(): 
+def main(): 
+    
     # 1. download ckpt 
     ckpt_path_list = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
     weight_dict_list = [] 
@@ -178,4 +178,4 @@ def valid_base(base_model, test_loader, epoch):
 
 
 if __name__ == '__main__': 
-    train() 
+    main() 
