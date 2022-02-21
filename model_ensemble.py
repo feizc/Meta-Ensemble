@@ -33,7 +33,7 @@ if __name__ == '__main__':
 
     weight_files = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
     ensemble_model = VggEnsemble(vgg11_bn(), weight_files)  
-
+    
     pretrained_size = 224
     pretrained_means = [0.485, 0.456, 0.406]
     pretrained_stds = [0.229, 0.224, 0.225] 
@@ -61,9 +61,9 @@ if __name__ == '__main__':
                 # print(out.size()) # (bsz, class) 
                 predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
                 acc += (predict_y == label).sum().item() / predict_y.size(0)
-        pbar.set_postfix(acc=acc / (it + 1))
-        pbar.update() 
-        time_stamp += 1 
+            pbar.set_postfix(acc=acc / (it + 1))
+            pbar.update() 
+            time_stamp += 1 
                 #if it == 20:
                 #    break 
         # scheduler.step()
