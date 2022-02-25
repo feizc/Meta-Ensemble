@@ -2,7 +2,7 @@
 
 from turtle import forward
 import torch 
-from torch import nn, Tensor
+from torch import device, nn, Tensor
 import math 
 from packaging import version
 
@@ -34,6 +34,7 @@ class WeightformerConfig():
     # parameter settings for WeightFormer 
     def __init__(
         self, 
+        weight_dim=3*3*64,
         attention_window=4,
         hidden_size=768,
         num_hidden_layers=12,
@@ -43,7 +44,11 @@ class WeightformerConfig():
         hidden_dropout_prob=0.1, 
         attention_probs_dropout_prob=0.1,
         layer_norm_eps=1e-12,
+        type_vocab_size=3,  # # previous, model 1, model 2
+        max_position_embeddings=5000,
+        pad_token_id=0,
     ):
+        self.weight_dim = weight_dim
         self.attention_window = attention_window
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -53,11 +58,15 @@ class WeightformerConfig():
         self.hidden_dropout_prob = hidden_dropout_prob
         self.attention_probs_dropout_prob = attention_probs_dropout_prob
         self.layer_norm_eps = layer_norm_eps 
+        self.type_vocab_size = type_vocab_size 
+        self.max_position_embeddings = max_position_embeddings
+        self.pad_token_id = pad_token_id 
+
 
 
 
 class WeightformerSelfAttention(nn.Module): 
-    def __init__(self, config):
+    def __init__(self, config, layer_id=0):
         super().__init__() 
         self.num_heads = config.num_attention_heads 
         self.head_dim = int(config.hidden_size / self.num_heads) 
@@ -73,7 +82,16 @@ class WeightformerSelfAttention(nn.Module):
         self.value_global = nn.Linear(config.hidden_size, self.embed_dim)
 
         self.dropout = config.attention_probs_dropout_prob 
-        self.one_sided_attn_window_size = config.attention_window // 2 
+        self.layer_id = layer_id
+        attention_window = config.attention_window[self.layer_id]
+        assert (
+            attention_window % 2 == 0
+        ), f"`attention_window` for layer {self.layer_id} has to be an even value. Given {attention_window}"
+        assert (
+            attention_window > 0
+        ), f"`attention_window` for layer {self.layer_id} has to be positive. Given {attention_window}"
+
+        self.one_sided_attn_window_size = attention_window // 2
     
     def forward(
         self,
@@ -499,7 +517,6 @@ class WeightformerEncoder(nn.Module):
         attention_mask=None,
         output_attentions=False,
         output_hidden_states=False,
-        return_dict=True,
     ):
 
         is_index_masked = attention_mask < 0
@@ -555,16 +572,207 @@ class WeightformerEncoder(nn.Module):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(
-                v for v in [hidden_states, all_hidden_states, all_attentions, all_global_attentions] if v is not None
-            )
+        
         return (
             hidden_states,
             all_hidden_states,
             all_attentions,
             all_global_attentions,
         )
+
+
+
+
+class WeightformerEmbeddings(nn.Module): 
+    def __init__(self, config):
+        super().__init__()
+        # project weight matrix into model dimension 
+        self.weight_embeddings = nn.Linear(config.weight_dim, config.hidden_size)
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
+        self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
+
+        # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
+        # any TensorFlow checkpoint file
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        # position_ids (1, len position emb) is contiguous in memory and exported when serialized
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.position_embedding_type = getattr(config, "position_embedding_type", "absolute") 
+    
+    def forward(self, input_weight, weight_type_ids=None, position_ids=None):
+        if position_ids is None:
+            position_ids = self.create_position_ids_from_inputs_embeds(input_weight)
+
+        input_shape = input_weight.size()[:-1]
+        seq_length = input_shape[1]
+
+        if position_ids is None:
+            position_ids = self.position_ids[:, :seq_length]
+
+        if weight_type_ids is None:
+            weight_type_ids= torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+
+        
+        inputs_embeds = self.weight_embeddings(input_weight)
+        position_embeddings = self.position_embeddings(position_ids)
+        weight_type_embeddings = self.token_type_embeddings(weight_type_ids)
+
+        embeddings = inputs_embeds + position_embeddings + weight_type_embeddings
+        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings 
+
+    def create_position_ids_from_inputs_embeds(self, inputs_weight):
+        """
+        We are provided weight matrix directly. We cannot infer which are padded so just generate sequential position ids.
+        Args:
+            inputs_embeds: torch.Tensor inputs_embeds:
+        Returns: torch.Tensor
+        """
+        input_shape = inputs_weight.size()[:-1]
+        sequence_length = input_shape[1]
+
+        position_ids = torch.arange(1, sequence_length + 1, dtype=torch.long, device=inputs_weight.device)
+        return position_ids.unsqueeze(0).expand(input_shape)
+
+
+
+
+class Weightformer(nn.Module): 
+    def __init__(self, config):
+        super().__init__()
+        self.config = config 
+
+        if isinstance(config.attention_window, int):
+            assert config.attention_window % 2 == 0, "`config.attention_window` has to be an even value"
+            assert config.attention_window > 0, "`config.attention_window` has to be positive"
+            config.attention_window = [config.attention_window] * config.num_hidden_layers  # one value per layer
+        else:
+            assert len(config.attention_window) == config.num_hidden_layers, (
+                "`len(config.attention_window)` should equal `config.num_hidden_layers`. "
+                f"Expected {config.num_hidden_layers}, given {len(config.attention_window)}"
+            )
+        
+        self.embeddings = WeightformerEmbeddings(config) 
+        self.encoder = WeightformerEncoder(config) 
+        self.inverse_weight_project = nn.Linear(config.hidden_size, config.weight_dim)
+    
+    def forward(
+        self,
+        input_weight,
+        attention_mask=None, 
+        global_attention_mask=None,
+        weight_type_ids=None,
+        position_ids=None,
+    ): 
+        # initialize local attention 
+        # attention_mask = torch.ones(input_ids.shape, dtype=torch.long, device=input_weight.device)
+        # initialize global attention 
+        # global_attention_mask = torch.zeros(input_ids.shape, dtype=torch.long, device=input_weight.device) 
+        # global_attention_mask = [:, [1,256]] = 1 
+        device = input_weight.device 
+        input_shape = input_weight.size()[:-1]
+
+        if attention_mask is None: 
+            attention_mask = torch.ones(input_shape, device=device) 
+        if weight_type_ids is None:
+            weight_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)  
+        
+        # merge `global_attention_mask` and `attention_mask`
+        if global_attention_mask is not None:
+            attention_mask = self._merge_to_attention_mask(attention_mask, global_attention_mask)
+        
+
+        padding_len, input_weight, attention_mask, weight_type_ids, position_ids = self._pad_to_window_size(
+            input_weight=input_weight,
+            attention_mask=attention_mask,
+            weight_type_ids=weight_type_ids,
+            position_ids=position_ids,
+            pad_token_id=self.config.pad_token_id,
+            device=device
+        )
+
+        embedding_output = self.embeddings(
+            input_weight=input_weight, weight_type_ids=weight_type_ids, position_ids=position_ids
+        ) 
+
+        encoder_output = self.encoder(
+            embedding_output, 
+            attention_mask=attention_mask,
+        )
+
+        sequence_output = encoder_output[0] 
+        # undo padding
+        if padding_len > 0:
+            # unpad `sequence_output` because the calling function is expecting a length == input_ids.size(1)
+            sequence_output = sequence_output[:, :-padding_len] 
+        sequence_output = self.inverse_weight_project(sequence_output)
+        
+        return (sequence_output, encoder_output[1:])
+
+
+
+
+        
+    
+    def _merge_to_attention_mask(self, attention_mask: torch.Tensor, global_attention_mask: torch.Tensor):
+        # weightformer self attention expects attention mask to have 0 (no attn), 1 (local attn), 2 (global attn)
+        # (global_attention_mask + 1) => 1 for local attention, 2 for global attention
+        # => final attention_mask => 0 for no attention, 1 for local attention 2 for global attention
+        if attention_mask is not None:
+            attention_mask = attention_mask * (global_attention_mask + 1)
+        else:
+            # simply use `global_attention_mask` as `attention_mask`
+            # if no `attention_mask` is given
+            attention_mask = global_attention_mask + 1
+        return attention_mask 
+    
+
+    def _pad_to_window_size(
+        self,
+        input_weight: torch.Tensor,
+        attention_mask: torch.Tensor,
+        weight_type_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        pad_token_id: int, 
+        device
+    ):
+        """A helper function to pad tokens and mask to work with implementation of Weightformer self-attention."""
+        # padding
+        attention_window = (
+            self.config.attention_window
+            if isinstance(self.config.attention_window, int)
+            else max(self.config.attention_window)
+        )
+
+        assert attention_window % 2 == 0, f"`attention_window` should be an even value. Given {attention_window}"
+        input_shape = input_weight.shape
+        batch_size, seq_len, weight_dim = input_shape
+
+        padding_len = (attention_window - seq_len % attention_window) % attention_window
+        if padding_len > 0:
+            print(
+                f"Input ids are automatically padded from {seq_len} to {seq_len + padding_len} to be a multiple of "
+                f"`config.attention_window`: {attention_window}"
+            )
+
+            if position_ids is not None:
+                # pad with position_id 
+                position_ids = nn.functional.pad(position_ids, (0, padding_len), value=pad_token_id)
+            if input_weight is not None:
+                inputs_weight_padding = torch.zeros((batch_size, padding_len, weight_dim), device=device)
+                input_weight = torch.cat([input_weight, inputs_weight_padding], dim=-2)
+
+            attention_mask = nn.functional.pad(
+                attention_mask, (0, padding_len), value=False
+            )  # no attention on the padding tokens
+            weight_type_ids = nn.functional.pad(weight_type_ids, (0, padding_len), value=0)  # pad with token_type_id = 0
+
+        return padding_len, input_weight, attention_mask, weight_type_ids, position_ids
+
+
+
 
 
 
@@ -577,17 +785,21 @@ class WeightformerEncoder(nn.Module):
 
 if __name__ == '__main__': 
     configuration = WeightformerConfig() 
-    print(configuration.hidden_size) 
-    wm = WeightformerSelfAttention(configuration) 
-    wma = WeightformerAttention(configuration)
-    wl = WeightformerLayer(configuration)
-    we = WeightformerEncoder(configuration)
+    #print(configuration.hidden_size) 
+    #wm = WeightformerSelfAttention(configuration) 
+    #wma = WeightformerAttention(configuration)
+    #wl = WeightformerLayer(configuration)
+    #we = WeightformerEncoder(configuration) 
+    wf = Weightformer(configuration)
 
-    input = torch.randn(2, 24, 768) 
+    input = torch.randn(2, 24, 576) 
     attention_mask = torch.ones(2, 24)
-    wm(input, attention_mask) 
-    wma(input, attention_mask) 
-    wl(input, attention_mask)
-    we(input, attention_mask)
+    o = wf(input) 
+    print(o[0].size())
+    #wm(input, attention_mask) 
+    #wma(input, attention_mask) 
+    #wl(input, attention_mask)
+    #o = we(input, attention_mask)
+    
 
 
