@@ -104,6 +104,7 @@ def train():
         with tqdm(desc='Epoch %d - train' % epoch, unit='it', total=len(train_loader)) as pbar:
             for it, (image, label) in enumerate(train_loader):
                 image, label = image.to(device), label.to(device) 
+                print(label.size())
                 optimizer.zero_grad()
                 out = model(image) 
                 loss = loss_fn(out, label) 

@@ -9,13 +9,14 @@ from tqdm import tqdm
 
 
 class VggEnsemble(nn.Module): 
-    def __init__(self, model, weight_files):
+    def __init__(self, model, weight_files, device):
         super(VggEnsemble, self).__init__() 
         self.n = len(weight_files) 
         self.models = nn.ModuleList([copy.deepcopy(model) for _ in range(self.n)]) 
         for i in range(self.n): 
             state_dict_i = torch.load(weight_files[i]) 
-            self.models[i].load_state_dict(state_dict_i) 
+            self.models[i].load_state_dict(state_dict_i)
+            self.models[i] = self.models[i].to(device)
 
     def forward(self, image): 
         out_ensemble = [] 

@@ -1,11 +1,58 @@
 import pickle 
 from PIL import Image
-from zmq import device 
 from model import vgg11_bn 
 from torch import nn 
 import torch 
+from torchvision import datasets, transforms 
 
 from train_vgg import OUTPUT_DIM 
+
+
+vgg11_predict_layers = [
+    'features.0.weight',
+    'features.4.weight',
+    'features.8.weight',
+    'features.11.weight',
+]
+
+
+
+def cifa10_data_load(batch_size=8):
+    # dataset 
+    pretrained_size = 224
+    pretrained_means = [0.485, 0.456, 0.406]
+    pretrained_stds = [0.229, 0.224, 0.225]
+
+    train_transform = transforms.Compose([
+                               transforms.Resize(pretrained_size),
+                               transforms.RandomRotation(5),
+                               transforms.RandomHorizontalFlip(0.5),
+                               transforms.RandomCrop(pretrained_size, padding=10),
+                               transforms.ToTensor(),
+                               transforms.Normalize(mean=pretrained_means,
+                                                    std=pretrained_stds)
+                        ])
+
+    test_transform = transforms.Compose([
+                               transforms.Resize(pretrained_size),
+                               transforms.ToTensor(),
+                               transforms.Normalize(mean=pretrained_means,
+                                                    std=pretrained_stds)
+                        ])
+
+    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                              shuffle=True) 
+    
+    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                              shuffle=False) # num_workers=2 
+
+    classes = ('plane', 'car', 'bird', 'cat',
+               'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
+
+    return train_loader, test_loader
+
 
 
 def data_plot():
@@ -56,7 +103,7 @@ def parameter_dict_combine(weight_dict_list, device, mode='linear'):
         return combine_weight_dict, weight_size_dict 
 
     for key in weight_dict_list[0].keys(): 
-        if 'features.0.weight' not in key:
+        if key not in vgg11_predict_layers:
             continue
         weight_matrix = weight_dict_list[0][key] 
         if len(weight_matrix.size()) < 1:

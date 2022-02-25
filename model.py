@@ -1,5 +1,6 @@
 from pyexpat import model
 from turtle import forward
+from unicodedata import name
 import torch
 import torch.nn as nn
 from torch.hub import load_state_dict_from_url
@@ -451,24 +452,31 @@ class EPEmbeddings(nn.Module):
 
 # Transformer for ensemble parameter prediction 
 class EPTransformer(nn.Module): 
-    def __init__(self, N, padding_idx, d_model=512, d_k=64, d_v=64, h=8, d_ff=2048, dropout=.1,
+    def __init__(self, N, padding_idx, size_dict, d_model=512, d_k=64, d_v=64, h=8, d_ff=2048, dropout=.1,
                  identity_map_reordering=False, attention_module=None, attention_module_kwargs=None):
         super(EPTransformer, self).__init__() 
-        self.fc = nn.Linear(3*3*3, d_model) 
+        # self.fc = nn.Linear(3*3*3, d_model) 
+        self.fc_dict = nn.ModuleDict() 
+        self.inverse_fc_dict = nn.ModuleDict() 
+
+        for key in size_dict: 
+            self.fc_dict[module_name_refine(key)] = nn.Linear(size_dict[key][1], d_model) 
+            self.inverse_fc_dict[module_name_refine(key)] = nn.Linear(d_model, size_dict[key][1])
+    
         self.dropout = nn.Dropout(p=dropout) 
         self.layer_norm = nn.LayerNorm(d_model) 
-        self.inverse_fc = nn.Linear(d_model, 3*3*3) 
+
         self.transforms = nn.ModuleList([EncoderLayer(d_model, d_k, d_v, h, d_ff, dropout,
                                                   identity_map_reordering=identity_map_reordering,
                                                   attention_module=attention_module,
                                                   attention_module_kwargs=attention_module_kwargs)
                                         for _ in range(N)]) 
         
-        self.embeddings = EPEmbeddings()
+        self.embeddings = EPEmbeddings() 
         self.padding_idx = padding_idx 
 
-    def forward(self, input): 
-        out = self.fc(input) 
+    def forward(self, input, named_layer): 
+        out = self.fc_dict[module_name_refine(named_layer)](input) 
         out = F.relu(out) 
         out = self.embeddings(out)
         out = self.dropout(out) 
@@ -485,7 +493,7 @@ class EPTransformer(nn.Module):
         out = out[:, :seq_len, :]  # (bsz, n_o, d_in)
         # outs = torch.cat(outs, 1) # (b_s, encoder layer, seq_len, d_in) 
         
-        out = self.inverse_fc(out) # (bsz, n_o, k*k*n_i) 
+        out = self.inverse_fc_dict[module_name_refine(named_layer)](out) # (bsz, n_o, k*k*n_i) 
         return out
 
 

@@ -114,8 +114,8 @@ def meta_loss(generated_weight_dict, target_weight_dict):
 
 
 # train for total/ only fc 
-def train_base(base_model): 
-
+def train_base(base_model):
+    
     # dataset 
     train_loader, test_loader = cifa10_data_load()
     
@@ -155,7 +155,7 @@ def train_base(base_model):
 
 
 
-def valid_base(base_model, test_loader, epoch):
+def valid_base(base_model, test_loader, epoch=0):
     acc = .0 
     time_stamp = 0 
     base_model.eval() 
