@@ -2,10 +2,9 @@ import torch
 from torchvision import datasets, transforms 
 from torch import nn 
 from tqdm import tqdm 
-from model import ParameterProject 
+from model import ParameterProject, vgg11_bn 
 from utils import parameter_dict_combine, weight_dict_print, weight_detach,\
                     weight_size_dict_generate, weight_resize_for_model_load
-from model import vgg11_bn 
 from utils import cifa10_data_load
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 

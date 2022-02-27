@@ -5,9 +5,8 @@ import torch
 import os 
 from tqdm import tqdm
 
-from model_ensemble import VggEnsemble 
+from model import ModelEnsemble, vgg11_bn 
 from utils import cifa10_data_load
-from model import vgg11_bn  
 from dataset import EnsembleDataset, vgg_ensemble_generate
 
 
@@ -40,7 +39,7 @@ def main():
         IN_FEATURES = model.classifier[-1].in_features
         final_fc = nn.Linear(IN_FEATURES, 10) 
         model.classifier[-1] = final_fc  
-    ensemble_model = VggEnsemble(model, weight_files, device)  
+    ensemble_model = ModelEnsemble(model, weight_files, device)  
     model = model.to(device) 
 
     loss_fn = nn.CrossEntropyLoss() 

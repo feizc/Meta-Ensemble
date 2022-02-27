@@ -2,10 +2,10 @@ import torch
 from torchvision import datasets, transforms 
 from torch import nn 
 from tqdm import tqdm 
-from model import ParameterProject 
+from model import ParameterProject, vgg11_bn   
 from utils import parameter_dict_combine, weight_dict_print, weight_size_dict_generate, weight_resize_for_model_load
 from utils import weight_detach
-from model import vgg11_bn  
+
 
 batch_size = 8 
 epochs = 200

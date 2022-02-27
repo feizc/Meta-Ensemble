@@ -6,9 +6,8 @@ from torch import nn
 from tqdm import tqdm 
 import numpy as np 
 
-from model_ensemble import VggEnsemble 
+from model import ModelEnsemble, vgg11_bn
 from utils import cifa10_data_load
-from model import vgg11_bn 
 
 
 
@@ -36,7 +35,7 @@ def vgg_ensemble_generate(ensemble_train_path, ensemble_test_path, resize_flag, 
         IN_FEATURES = base_model.classifier[-1].in_features
         final_fc = nn.Linear(IN_FEATURES, 10) 
         base_model.classifier[-1] = final_fc 
-    ensemble_model = VggEnsemble(base_model, weight_files)  
+    ensemble_model = ModelEnsemble(base_model, weight_files, device)  
     image_m = None
     label_m = None
 
@@ -97,12 +96,17 @@ def vgg_ensemble_generate(ensemble_train_path, ensemble_test_path, resize_flag, 
 
 if __name__ == '__main__': 
     resize_flag = False 
-
+    
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu") 
     weight_files = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
-
-    # vgg_ensemble_generate() 
-    data_path = 'data/ensemble_result.json' 
+    train_data_path = 'data/ensemble_train_data.json'
+    test_data_path = 'data/ensembe_test_data.json' 
+    
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
+    weight_files = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
+    
+    # vgg_ensemble_generate(train_data_path, test_data_path, resize_flag, weight_files, device) 
+    data_path = 'data/ensemble_train_data.json' 
     dataset = EnsembleDataset(data_path) 
     # image, label = dataset[0] 
     #print(image.size(), label) 
