@@ -1,7 +1,7 @@
 import torch 
 import torch.nn as nn
 from torch.nn.modules.module import Module
-from vgg import vgg11_bn 
+from .vgg import vgg11_bn 
 import copy 
 from torchvision import datasets, transforms  
 from tqdm import tqdm 

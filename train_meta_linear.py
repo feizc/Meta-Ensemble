@@ -1,35 +1,52 @@
 import torch 
-from torchvision import datasets, transforms 
 from torch import nn 
 from tqdm import tqdm 
-from model import ParameterProject, vgg11_bn 
+from model import ParameterProject, vgg11_bn, resnet50 
 from utils import parameter_dict_combine, weight_dict_print, weight_detach,\
                     weight_size_dict_generate, weight_resize_for_model_load
 from utils import cifa10_data_load
 
+from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
+
+# network = {'vgg11', 'resnet50'}
+network = 'resnet50'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
 base_epochs = 8 
 batch_size = 8
 save_path = 'ckpt/linear_parameter_predictor_best.pth' 
-# analyze how many ratio for training 
+# analyze how many ratio for training in the few shot experiments 
 few_shot_flag = True 
-
+resize_flag = True 
 
 def main(): 
     
     # 1. download ckpt 
-    ckpt_path_list = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
+    if network == 'vgg11': 
+        ckpt_path_list = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
+    if network == 'resnet50': 
+        ckpt_path_list = ['ckpt/resnet50_best.pth', 'ckpt/resnet50_best.pth']
+    
     weight_dict_list = [] 
     for ckpt_path in ckpt_path_list:
         weight_dict_list.append(torch.load(ckpt_path, map_location=None)) 
-    combine_weight_dict, weight_size_dict = parameter_dict_combine(weight_dict_list, device) 
+    combine_weight_dict, weight_size_dict = parameter_dict_combine(weight_dict_list, device, 'linear', network) 
     combine_weight_size_dict = weight_size_dict_generate(combine_weight_dict) 
-
+    weight_dict_print(combine_weight_dict) 
+    
     # 2. meta learner and base learner 
     parameter_predict_model = ParameterProject(weight_size_dict=combine_weight_size_dict) 
     parameter_predict_model = parameter_predict_model.to(device) 
-    base_model = vgg11_bn()
+    if network == 'vgg11': 
+        base_model = vgg11_bn() 
+    else:
+        base_model = resnet50() 
+    
+    if resize_flag == True and network == 'resnet50': 
+        IN_FEATURES = base_model.fc.in_features 
+        final_fc = nn.Linear(IN_FEATURES, 10) 
+        base_model.fc = final_fc 
+
     base_model = base_model.to(device)
 
     meta_optimizer = torch.optim.Adam(parameter_predict_model.parameters(), lr=0.0001) 
@@ -101,8 +118,10 @@ def meta_loss(generated_weight_dict, target_weight_dict):
     begin_flag = True 
     mse_loss = nn.MSELoss()
     for key in generated_weight_dict: 
-        if 'features.0.weight' not in key: 
+        if network == 'vgg11' and key not in vgg11_predict_layers: 
             continue 
+        if network == 'resnet50' and key not in resnet50_predict_layers: 
+            continue
         if begin_flag == True: 
             loss = mse_loss(generated_weight_dict[key].float(), target_weight_dict[key].float()) 
             begin_flag = False 

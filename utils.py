@@ -1,24 +1,15 @@
-import pickle 
+import pickle
+from random import shuffle 
 from PIL import Image
 from model import vgg11_bn 
 from torch import nn 
 import torch 
 from torchvision import datasets, transforms 
 
-from train_vgg import OUTPUT_DIM 
+from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
 
 
-vgg11_predict_layers = [
-    'features.0.weight',
-    'features.4.weight',
-    'features.8.weight',
-    'features.11.weight',
-]
-
-
-
-def cifa10_data_load(batch_size=8):
-    # dataset 
+def image_preprocess_transform():
     pretrained_size = 224
     pretrained_means = [0.485, 0.456, 0.406]
     pretrained_stds = [0.229, 0.224, 0.225]
@@ -38,13 +29,20 @@ def cifa10_data_load(batch_size=8):
                                transforms.ToTensor(),
                                transforms.Normalize(mean=pretrained_means,
                                                     std=pretrained_stds)
-                        ])
+                        ]) 
+    return train_transform, test_transform 
 
-    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
+
+
+def cifa10_data_load(data_path='data/cifar', batch_size=8):
+    # image transform 
+    train_transform, test_transform = image_preprocess_transform() 
+
+    train_set = datasets.CIFAR10(data_path, train=True, download=False, transform=train_transform)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
                                               shuffle=True) 
     
-    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
+    test_set = datasets.CIFAR10(data_path, train=False, download=False, transform=test_transform)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
                                               shuffle=False) # num_workers=2 
 
@@ -52,6 +50,21 @@ def cifa10_data_load(batch_size=8):
                'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
 
     return train_loader, test_loader
+
+
+
+
+def imagenet_data_load(data_path='data/imagenet', batch_size=8): 
+    train_transform, test_transform = image_preprocess_transform() 
+
+    train_set = datasets.ImageNet(data_path, split='train', transform=train_transform, download=False) 
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True) 
+
+    val_set = datasets.ImageNet(data_path, split='val', transform=test_transform, download=False) 
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=False) 
+
+    return train_loader, val_loader 
+
 
 
 
@@ -94,8 +107,8 @@ def weight_size_dict_generate(weight_dict):
     return weight_size_dict 
 
 
-# combine the model weights in one dict 
-def parameter_dict_combine(weight_dict_list, device, mode='linear'): 
+# combine the model weights in one dict  network={'vgg11', 'resnet50'}
+def parameter_dict_combine(weight_dict_list, device, mode='linear', network='vgg11'): 
     combine_weight_dict = {} 
     weight_size_dict = {}
 
@@ -103,8 +116,10 @@ def parameter_dict_combine(weight_dict_list, device, mode='linear'):
         return combine_weight_dict, weight_size_dict 
 
     for key in weight_dict_list[0].keys(): 
-        if key not in vgg11_predict_layers:
-            continue
+        if network == 'vgg11' and key not in vgg11_predict_layers:
+            continue 
+        if network == 'resnet50' and key not in resnet50_predict_layers:
+            continue 
         weight_matrix = weight_dict_list[0][key] 
         if len(weight_matrix.size()) < 1:
             weight_matrix = weight_matrix.unsqueeze(0)

@@ -47,11 +47,11 @@ def main():
                                                     std=pretrained_stds)
                         ])
 
-    train_set = datasets.CIFAR10('data', train=True, download=False, transform=train_transform)
+    train_set = datasets.CIFAR10('data/cifar', train=True, download=False, transform=train_transform)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
                                               shuffle=True) 
     
-    test_set = datasets.CIFAR10('data', train=False, download=False, transform=test_transform)
+    test_set = datasets.CIFAR10('data/cifar', train=False, download=False, transform=test_transform)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
                                               shuffle=False) # num_workers=2 
 

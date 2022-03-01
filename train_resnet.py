@@ -70,9 +70,9 @@ def validation(test_loader, model, epoch):
 
 
 def main(): 
-    train_loader, test_loader = cifa10_data_load(batch_size) 
+    train_loader, test_loader = cifa10_data_load(batch_size=batch_size) 
     model = resnet50() 
-    # weight_dict_print(model.state_dict()) 
+    weight_dict_print(model.state_dict()) 
 
     if load_pretrain == True: 
         state_dict = torch.load(pretrain_path, map_location=None) 
@@ -82,7 +82,7 @@ def main():
     model.fc = final_fc 
 
     model = model.to(device) 
-
+    
     loss_fn = nn.CrossEntropyLoss()  
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) 
 
