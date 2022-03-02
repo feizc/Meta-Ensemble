@@ -1,12 +1,14 @@
 import torch 
 from torch import nn 
-from model import EPTransformer, vgg11_bn, resnet50
+from model import EPTransformer, weightformer, vgg11_bn, resnet50
 from utils import parameter_dict_combine, weight_size_dict_generate, weight_dict_print 
 from utils import weight_detach, weight_resize_for_model_load 
 from train_meta_linear import train_base 
 from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
 
 
+# version = {'transformer', 'weightformer'}
+tranformer_version = 'transformer'
 network = 'resnet50'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
