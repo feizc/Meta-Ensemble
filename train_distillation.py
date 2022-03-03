@@ -1,4 +1,5 @@
-# knowledge distillation for vgg 
+# knowledge distillation for network, which serves as a baseline 
+
 from torch import nn  
 import json 
 import torch 

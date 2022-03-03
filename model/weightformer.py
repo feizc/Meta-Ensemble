@@ -1,10 +1,10 @@
-# WeightFormer for long sequence of weight predition 
+# WeightFormer for long sequence of weight predition， referred to the framework of huggingface  
 
-from turtle import forward
 import torch 
 from torch import device, nn, Tensor
 import math 
 from packaging import version
+from .parameter_model import module_name_refine 
 
 
 class GELUActivation(nn.Module):
@@ -34,21 +34,21 @@ class WeightformerConfig():
     # parameter settings for WeightFormer 
     def __init__(
         self, 
-        weight_dim=3*3*64,
+        weight_dict,
         attention_window=4,
         hidden_size=768,
-        num_hidden_layers=12,
+        num_hidden_layers=6,
         num_attention_heads=12,
-        intermediate_size=3072,
+        intermediate_size=2048,
         hidden_act="gelu",
         hidden_dropout_prob=0.1, 
         attention_probs_dropout_prob=0.1,
         layer_norm_eps=1e-12,
         type_vocab_size=3,  # # previous, model 1, model 2
-        max_position_embeddings=5000,
+        max_position_embeddings=2048,
         pad_token_id=0,
     ):
-        self.weight_dim = weight_dim
+        self.weight_dict = weight_dict
         self.attention_window = attention_window
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -587,7 +587,6 @@ class WeightformerEmbeddings(nn.Module):
     def __init__(self, config):
         super().__init__()
         # project weight matrix into model dimension 
-        self.weight_embeddings = nn.Linear(config.weight_dim, config.hidden_size)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
@@ -614,7 +613,7 @@ class WeightformerEmbeddings(nn.Module):
             weight_type_ids= torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
         
-        inputs_embeds = self.weight_embeddings(input_weight)
+        inputs_embeds = input_weight
         position_embeddings = self.position_embeddings(position_ids)
         weight_type_embeddings = self.token_type_embeddings(weight_type_ids)
 
@@ -642,7 +641,15 @@ class WeightformerEmbeddings(nn.Module):
 class Weightformer(nn.Module): 
     def __init__(self, config):
         super().__init__()
-        self.config = config 
+        self.config = config  
+        self.weight_dict = config.weight_dict
+        self.fc_dict = nn.ModuleDict() 
+        self.inverse_fc_dict = nn.ModuleDict() 
+
+        for key in self.weight_dict: 
+            self.fc_dict[module_name_refine(key)] = nn.Linear(self.weight_dict[key][1], config.hidden_size) 
+            self.inverse_fc_dict[module_name_refine(key)] = nn.Linear(config.hidden_size, self.weight_dict[key][1])
+
 
         if isinstance(config.attention_window, int):
             assert config.attention_window % 2 == 0, "`config.attention_window` has to be an even value"
@@ -656,11 +663,12 @@ class Weightformer(nn.Module):
         
         self.embeddings = WeightformerEmbeddings(config) 
         self.encoder = WeightformerEncoder(config) 
-        self.inverse_weight_project = nn.Linear(config.hidden_size, config.weight_dim)
+        
     
     def forward(
         self,
-        input_weight,
+        input_weight, 
+        named_layer, 
         attention_mask=None, 
         global_attention_mask=None,
         weight_type_ids=None,
@@ -672,6 +680,7 @@ class Weightformer(nn.Module):
         # global_attention_mask = torch.zeros(input_ids.shape, dtype=torch.long, device=input_weight.device) 
         # global_attention_mask = [:, [1,256]] = 1 
         device = input_weight.device 
+        input_weight = self.fc_dict[module_name_refine(named_layer)](input_weight) 
         input_shape = input_weight.size()[:-1]
 
         if attention_mask is None: 
@@ -707,12 +716,13 @@ class Weightformer(nn.Module):
         if padding_len > 0:
             # unpad `sequence_output` because the calling function is expecting a length == input_ids.size(1)
             sequence_output = sequence_output[:, :-padding_len] 
-        sequence_output = self.inverse_weight_project(sequence_output)
         
-        return (sequence_output, encoder_output[1:])
+        seq_len = sequence_output.size()[1]//2 
+        sequence_output = sequence_output[:, :seq_len, :]
 
-
-
+        sequence_output  = self.inverse_fc_dict[module_name_refine(named_layer)](sequence_output)
+        #return (sequence_output, encoder_output[1:])
+        return sequence_output
 
         
     
@@ -795,7 +805,7 @@ if __name__ == '__main__':
     input = torch.randn(2, 24, 576) 
     attention_mask = torch.ones(2, 24)
     o = wf(input) 
-    print(o[0].size())
+    print(o.size())
     #wm(input, attention_mask) 
     #wma(input, attention_mask) 
     #wl(input, attention_mask)

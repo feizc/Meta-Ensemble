@@ -125,11 +125,11 @@ def parameter_dict_combine(weight_dict_list, device, mode='linear', network='vgg
             weight_matrix = weight_matrix.unsqueeze(0)
         out_dim = weight_matrix.size()[0] 
         weight_size_dict[key] = weight_matrix.size()
-        weight_matrix = weight_matrix.view(out_dim, -1)
+        weight_matrix = weight_matrix.view(out_dim, -1).to(device)
         
         for i in range(1, len(weight_dict_list)): 
             t_weight_matrix = weight_dict_list[i][key]
-            t_weight_matrix = t_weight_matrix.view(out_dim, -1) 
+            t_weight_matrix = t_weight_matrix.view(out_dim, -1).to(device)
             if mode == 'transformer': 
                 weight_matrix = torch.cat((weight_matrix, t_weight_matrix), dim=0).to(device)
             else:
