@@ -1,17 +1,23 @@
+# distribution parallel script 
+# python -m torch.distributed.launch --nproc_per_node=4 train_transformer_ddp.py
+
 import torch 
-from torch import nn
+from torch import device, nn
 from torchaudio import transforms 
 from model import EPTransformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50
 from utils import parameter_dict_combine, weight_size_dict_generate, weight_dict_print 
-from utils import weight_detach, weight_resize_for_model_load 
-from train_meta_linear import train_base 
+from utils import weight_detach, weight_resize_for_model_load, cifa10_data_load
 from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
+from tqdm import tqdm 
 
+import argparse 
+import torch.distributed as dist 
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 # version = {'transformer', 'weightformer'} -> original transfor or weightformer 
 transformer_version = 'weightformer'
 network = 'resnet50'
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
+basic_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
 base_epochs = 8
 save_path = 'ckpt/weightformer_parameter_predictor_best.pth' 
@@ -20,6 +26,18 @@ resize_flag = True
 
 
 def main(): 
+    parser = argparse.ArgumentParser(description='WeightFormer Training') 
+    parser.add_argument("--local_rank", type=int, default=-1) 
+    args = parser.parse_args() 
+    local_rank = args.local_rank 
+
+    if args.local_rank != -1:
+        dist.init_process_group(backend='nccl', init_method='env://')
+        torch.cuda.set_device(args.local_rank)
+    map_location = "cuda:" + str(args.local_rank)
+    device = torch.device('cuda', local_rank) 
+
+
     # 1. load parameters of base learner 
     if network == 'vgg11': 
         ckpt_path_list = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
@@ -40,7 +58,8 @@ def main():
     else:
         configuration = WeightformerConfig(combine_weight_size_dict) 
         model = Weightformer(configuration)
-    model = model.to(device) 
+    model = model.to(basic_device) 
+
     if network == 'vgg11': 
         base_model = vgg11_bn() 
     else:
@@ -52,6 +71,7 @@ def main():
         base_model.fc = final_fc 
 
     base_model = base_model.to(device) 
+    base_model = DDP(base_model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True) 
 
     meta_optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) 
     
@@ -65,6 +85,7 @@ def main():
             generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device)
             detach_weight_dict = weight_detach(generated_weight_dict) 
             
+            detach_weight_dict = detach_weight_dict.to(device) 
             base_model.load_state_dict(detach_weight_dict) 
             target_weight_dict = train_base(base_model) 
 
@@ -90,6 +111,48 @@ def meta_loss(generated_weight_dict, target_weight_dict, named_layer):
         elif key == named_layer and begin_flag == False: 
             loss += mse_loss(generated_weight_dict[key].float(), target_weight_dict[key].float()) 
     return loss 
+
+
+# train for total/ only fc 
+def train_base(base_model, few_shot_flag=False):
+    
+    # dataset 
+    train_loader, test_loader = cifa10_data_load(distribution=True)
+    
+    base_optimizer = torch.optim.Adam(base_model.parameters(), lr=0.0001) 
+    loss_fn = nn.CrossEntropyLoss() 
+
+    # train base 
+    for epoch in range(base_epochs): 
+        
+        # validation the parameter prediction performance 
+
+        base_model.train()
+        running_loss = 0.0 
+        total_part_num = len(train_loader) // 10 
+        with tqdm(desc='Epoch %d - train' % epoch, unit='it', total=len(train_loader)) as pbar: 
+            for it, (image, label) in enumerate(train_loader):
+                image, label = image.to(device), label.to(device) 
+                base_optimizer.zero_grad() 
+
+                out = base_model(image) 
+                loss = loss_fn(out, label) 
+                loss.backward() 
+                base_optimizer.step()
+
+                running_loss += loss.item() 
+                pbar.set_postfix(loss=running_loss / (it + 1))
+                pbar.update() 
+                if few_shot_flag == True: 
+                    if it % total_part_num == 0: 
+                        print('Train set partial: ', it // total_part_num) 
+                        # print('\n')
+                        # valid_base(base_model, test_loader, epoch)
+                break 
+        break
+    
+    return base_model.module.state_dict()
+
 
 
 if __name__ == '__main__': 

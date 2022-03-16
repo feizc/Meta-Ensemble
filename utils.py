@@ -5,8 +5,13 @@ from model import vgg11_bn
 from torch import nn 
 import torch 
 from torchvision import datasets, transforms 
+from torch.utils.data import Dataset 
+import skimage.io as io
+from PIL import Image
 
 from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
+from torchvision.io import read_image 
+import os 
 
 
 def image_preprocess_transform():
@@ -34,22 +39,58 @@ def image_preprocess_transform():
 
 
 
-def cifa10_data_load(data_path='data/cifar', batch_size=8):
+def cifa10_data_load(data_path='data/cifar', batch_size=8, distribution=False):
     # image transform 
     train_transform, test_transform = image_preprocess_transform() 
-
-    train_set = datasets.CIFAR10(data_path, train=True, download=False, transform=train_transform)
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                              shuffle=True) 
-    
-    test_set = datasets.CIFAR10(data_path, train=False, download=False, transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
-                                              shuffle=False) # num_workers=2 
 
     classes = ('plane', 'car', 'bird', 'cat',
                'deer', 'dog', 'frog', 'horse', 'ship', 'truck') 
 
+    train_set = datasets.CIFAR10(data_path, train=True, download=False, transform=train_transform)
+    
+    test_set = datasets.CIFAR10(data_path, train=False, download=False, transform=test_transform)
+
+    if distribution == False:
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                                  shuffle=True) 
+        test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                                  shuffle=False) # num_workers=2 
+    else: 
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_set)
+        val_sampler = torch.utils.data.sampler.SequentialSampler(test_set) 
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, num_workers=8,
+                                                  sampler=train_sampler) 
+        test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=8,
+                                                  sampler=val_sampler) 
+
     return train_loader, test_loader
+
+
+class ImageNetDataset(Dataset): 
+
+    def __init__(self, annotation_path, image_dir, transform=None): 
+        with open(annotation_path, 'r') as f:
+            lines = f.readlines() 
+        self.image_label_list = [] 
+        for line in lines: 
+            line = line.strip().split() 
+            self.image_label_list.append([line[0], int(line[1])]) 
+        self.image_dir = image_dir 
+        self.transform = transform 
+    
+    def __len__(self):
+        return len(self.image_label_list) 
+    
+    def __getitem__(self, index):
+        image_path = os.path.join(self.image_dir, self.image_label_list[index][0]) 
+        #image = io.imread(image_path) 
+        #image = Image.fromarray(image).convert("RGB")
+        image = Image.open(image_path).convert("RGB")
+        if self.transform:
+            image = self.transform(image) 
+        label = torch.tensor(self.image_label_list[index][1]).long() 
+        return image, label 
 
 
 

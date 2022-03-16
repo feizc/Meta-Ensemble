@@ -1,5 +1,5 @@
 # knowledge distillation for network, which serves as a baseline 
-
+# As training with kl-divergence loss prones to nan at begining stage, we first train with voting label 
 from torch import nn  
 import json 
 import torch 
@@ -17,6 +17,8 @@ test_data_path = 'data/ensembe_test_data.json'
 resize_flag = False 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 weight_files = ['ckpt/vgg11_bn.pth', 'ckpt/vgg11_bn.pth'] 
+pretrain_path = 'ckpt/vgg11_bn.pth' 
+load_pretrain = True
 batch_size = 8
 save_path = 'ckpt/vgg11_ditillation.pth'
 epochs = 50
@@ -36,6 +38,9 @@ def main():
     train_loader, test_loader = cifa10_data_load()
 
     model = vgg11_bn() 
+    if load_pretrain == True: 
+        state_dict = torch.load(pretrain_path, map_location=None) 
+        model.load_state_dict(state_dict) 
     if resize_flag == True: 
         IN_FEATURES = model.classifier[-1].in_features
         final_fc = nn.Linear(IN_FEATURES, 10) 
@@ -43,9 +48,10 @@ def main():
     ensemble_model = ModelEnsemble(model, weight_files, device)  
     model = model.to(device) 
 
-    loss_fn = nn.CrossEntropyLoss() 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+    # loss_fn = nn.CrossEntropyLoss() 
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) 
+    loss_fn = nn.KLDivLoss(reduction="batchmean")
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
 
     best_acc = 0.0 
     patience = 0
@@ -59,11 +65,11 @@ def main():
             for it, (image, label) in enumerate(train_loader):
                 image, label = image.to(device), label.to(device) 
                 with torch.no_grad(): 
-                    out = ensemble_model(image) 
-                    predict_y = torch.max(out, dim=1)[1] 
+                    target_out = ensemble_model(image) 
+                    # predict_y = torch.max(out, dim=1)[1] 
                 optimizer.zero_grad()
                 out = model(image) 
-                loss = loss_fn(out, predict_y) 
+                loss = loss_fn(out, target_out) 
                 loss.backward() 
                 optimizer.step()
 
