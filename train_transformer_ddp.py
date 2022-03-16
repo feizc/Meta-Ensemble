@@ -1,9 +1,8 @@
 # distribution parallel script 
-# python -m torch.distributed.launch --nproc_per_node=4 train_transformer_ddp.py
+# python -m torch.distributed.launch --nproc_per_node=2 train_transformer_ddp.py
 
 import torch 
-from torch import device, nn
-from torchaudio import transforms 
+from torch import device, nn 
 from model import EPTransformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50
 from utils import parameter_dict_combine, weight_size_dict_generate, weight_dict_print 
 from utils import weight_detach, weight_resize_for_model_load, cifa10_data_load
@@ -18,7 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 transformer_version = 'weightformer'
 network = 'resnet50'
 basic_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
-meta_epochs = 200
+meta_epochs = 200 
 base_epochs = 8
 save_path = 'ckpt/weightformer_parameter_predictor_best.pth' 
 resize_flag = True 
@@ -60,19 +59,6 @@ def main():
         model = Weightformer(configuration)
     model = model.to(basic_device) 
 
-    if network == 'vgg11': 
-        base_model = vgg11_bn() 
-    else:
-        base_model = resnet50() 
-    
-    if resize_flag == True and network == 'resnet50': 
-        IN_FEATURES = base_model.fc.in_features 
-        final_fc = nn.Linear(IN_FEATURES, 10) 
-        base_model.fc = final_fc 
-
-    base_model = base_model.to(device) 
-    base_model = DDP(base_model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True) 
-
     meta_optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) 
     
     for epoch in range(meta_epochs): 
@@ -84,9 +70,9 @@ def main():
             # weight_dict_print(generated_weight_dict)
             generated_weight_dict = weight_resize_for_model_load(generated_weight_dict, weight_dict_list[0], device)
             detach_weight_dict = weight_detach(generated_weight_dict) 
-            
             detach_weight_dict = detach_weight_dict.to(device) 
-            base_model.load_state_dict(detach_weight_dict) 
+
+            base_model = ddp_base_model_initilize(detach_weight_dict, local_rank)
             target_weight_dict = train_base(base_model) 
 
             for t in range(base_epochs): 
@@ -102,6 +88,24 @@ def main():
 
 
 
+def ddp_base_model_initilize(weight_dict, local_rank): 
+    if network == 'vgg11': 
+        base_model = vgg11_bn() 
+    else:
+        base_model = resnet50() 
+    
+    if resize_flag == True and network == 'resnet50': 
+        IN_FEATURES = base_model.fc.in_features 
+        final_fc = nn.Linear(IN_FEATURES, 10) 
+        base_model.fc = final_fc 
+    
+    base_model = base_model.to(device) 
+    base_model.load_state_dict(weight_dict) 
+    base_model = DDP(base_model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True) 
+    return base_model 
+
+
+
 def meta_loss(generated_weight_dict, target_weight_dict, named_layer): 
     mse_loss = nn.MSELoss() 
     begin_flag = True
@@ -111,6 +115,7 @@ def meta_loss(generated_weight_dict, target_weight_dict, named_layer):
         elif key == named_layer and begin_flag == False: 
             loss += mse_loss(generated_weight_dict[key].float(), target_weight_dict[key].float()) 
     return loss 
+
 
 
 # train for total/ only fc 
@@ -146,13 +151,32 @@ def train_base(base_model, few_shot_flag=False):
                 if few_shot_flag == True: 
                     if it % total_part_num == 0: 
                         print('Train set partial: ', it // total_part_num) 
-                        # print('\n')
-                        # valid_base(base_model, test_loader, epoch)
+                        print('\n')
+                        valid_base(base_model, test_loader, epoch)
                 break 
         break
     
     return base_model.module.state_dict()
 
+
+
+def valid_base(test_loader, model, epoch): 
+    model.eval() 
+    acc = .0 
+    time_stamp = 0
+    with tqdm(desc='Epoch %d - evaluation' % epoch, unit='it', total=len(test_loader)) as pbar:
+        for it, (image, label) in enumerate(test_loader): 
+            image, label = image.to(device), label.to(device) 
+            with torch.no_grad(): 
+                out = model(image) # (bsz, vob)
+                predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
+                acc += (predict_y == label).sum().item() / predict_y.size(0)
+            pbar.set_postfix(acc=acc / (it + 1))
+            pbar.update() 
+            time_stamp += 1 
+            break 
+    val_acc = acc / time_stamp 
+    return val_acc 
 
 
 if __name__ == '__main__': 
