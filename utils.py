@@ -67,6 +67,34 @@ def cifa10_data_load(data_path='data/cifar', batch_size=8, distribution=False):
     return train_loader, test_loader
 
 
+def cifa100_data_load(data_path='data/cifar', batch_size=8, distribution=False):
+    # image transform 
+    train_transform, test_transform = image_preprocess_transform() 
+
+
+    train_set = datasets.CIFAR100(data_path, train=True, download=False, transform=train_transform)
+    
+    test_set = datasets.CIFAR100(data_path, train=False, download=False, transform=test_transform)
+
+    if distribution == False:
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                                  shuffle=True) 
+        test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size,
+                                                  shuffle=False) # num_workers=2 
+    else: 
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_set)
+        val_sampler = torch.utils.data.sampler.SequentialSampler(test_set) 
+        train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, num_workers=8,
+                                                  sampler=train_sampler) 
+        test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, num_workers=8,
+                                                  sampler=val_sampler) 
+
+    return train_loader, test_loader
+
+
+
+
 class ImageNetDataset(Dataset): 
 
     def __init__(self, annotation_path, image_dir, transform=None): 
