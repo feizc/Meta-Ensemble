@@ -18,4 +18,4 @@ VGG-11 and ResNet-50
 
 ## 3. Dataset 
 
-CIFAR-10 and ImageNet 
+CIFAR-10, CIFAR-100, and ImageNet 
