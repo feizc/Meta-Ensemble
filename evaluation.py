@@ -4,7 +4,7 @@ import torch
 from tqdm import tqdm 
 import numpy as np 
 
-from model import vgg11_bn, resnet50
+from model import ensemble_model, vgg11_bn, resnet50, ModelEnsemble 
 from train_vgg import OUTPUT_DIM
 
 
@@ -16,7 +16,7 @@ dataset_name = 'CIFAR-10'
 model_name = 'ResNet-50' 
 ckpt_path_list = ['ckpt/resnet50_best.pth', 'ckpt/resnet50_best.pth']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
-
+ensemble_flag = True 
 
 # On Calibration of Modern Neural Networks 
 def ece_score(py, y_test, n_bins=10):
@@ -75,6 +75,9 @@ def main():
     else: 
         print('model name setting error!') 
     
+    if ensemble_flag == True: 
+        ensemble_model = ModelEnsemble(model, ckpt_path_list, device) 
+
 
     acc_1_list = [] 
     acc_5_list = []
@@ -100,7 +103,7 @@ def main():
                     out = model(image) # (bsz, vob) 
                     predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
                     predict_top_5 = torch.topk(out, dim=1, k=5)[1] 
-                    ece += ece_score(f_softmax(out, dim=1), label)
+                    ece += ece_score(f_softmax(out, dim=1).cpu().numpy(), label.cpu().numpy())
                     acc += (predict_y == label).sum().item() / predict_y.size(0) 
                     acc5 += (predict_top_5 == label.unsqueeze(1)).sum().item() / predict_top_5.size(0) 
                     
@@ -120,6 +123,31 @@ def main():
     print('[ACC-5] Mean: ', np.mean(acc_5_list), ' Std: ', np.std(acc_5_list))
     print('[ECE] Mean: ', np.mean(ece_list), ' Std: ', np.std(ece_list))
 
+    if ensemble_flag == True:
+        acc = .0 
+        acc5 = .0 
+        ece = .0
+        time_stamp = 0 
+
+        with tqdm(desc='Ensemble - evaluation', unit='it', total=len(test_loader)) as pbar: 
+            for it, (image, label) in enumerate(test_loader): 
+                image, label = image.to(device), label.to(device) 
+                with torch.no_grad(): 
+                    out = ensemble_model(image) # (bsz, vob) 
+                    predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
+                    predict_top_5 = torch.topk(out, dim=1, k=5)[1] 
+                    ece += ece_score(f_softmax(out, dim=1).cpu().numpy(), label.cpu().numpy())
+                    acc += (predict_y == label).sum().item() / predict_y.size(0) 
+                    acc5 += (predict_top_5 == label.unsqueeze(1)).sum().item() / predict_top_5.size(0) 
+                    
+                pbar.set_postfix(acc=acc / (it + 1))
+                pbar.update() 
+                time_stamp += 1 
+                break 
+        val_acc1 = acc / time_stamp 
+        val_acc5 = acc5 / time_stamp 
+        val_ece = ece / time_stamp 
+        print('Ensemble Results:', val_acc1, val_acc5, val_ece)
 
 
 
