@@ -18,6 +18,35 @@ ckpt_path_list = ['ckpt/resnet50_best.pth', 'ckpt/resnet50_best.pth']
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 
 
+# On Calibration of Modern Neural Networks 
+def ece_score(py, y_test, n_bins=10):
+    py = np.array(py)
+    y_test = np.array(y_test)
+    if y_test.ndim > 1:
+        y_test = np.argmax(y_test, axis=1)
+    py_index = np.argmax(py, axis=1)
+    py_value = []
+    for i in range(py.shape[0]):
+        py_value.append(py[i, py_index[i]])
+    py_value = np.array(py_value)
+    acc, conf = np.zeros(n_bins), np.zeros(n_bins)
+    Bm = np.zeros(n_bins)
+    for m in range(n_bins):
+        a, b = m / n_bins, (m + 1) / n_bins
+        for i in range(py.shape[0]):
+            if py_value[i] > a and py_value[i] <= b:
+                Bm[m] += 1
+                if py_index[i] == y_test[i]:
+                    acc[m] += 1
+                conf[m] += py_value[i]
+        if Bm[m] != 0:
+            acc[m] = acc[m] / Bm[m]
+            conf[m] = conf[m] / Bm[m]
+    ece = 0
+    for m in range(n_bins):
+        ece += Bm[m] * np.abs((acc[m] - conf[m]))
+    return ece / sum(Bm)
+
 
 def main(): 
     if dataset_name == 'CIFAR-10':
@@ -47,7 +76,11 @@ def main():
         print('model name setting error!') 
     
 
-    acc_list = []
+    acc_1_list = [] 
+    acc_5_list = []
+    ece_list = [] 
+    f_softmax = nn.functional.softmax
+
 
     for idx in range(len(ckpt_path_list)): 
         state_dict = torch.load(ckpt_path_list[idx], map_location=None) 
@@ -56,23 +89,40 @@ def main():
 
         model.eval() 
         acc = .0 
+        acc5 = .0 
+        ece = .0
         time_stamp = 0 
 
         with tqdm(desc='Model %d - evaluation' % idx, unit='it', total=len(test_loader)) as pbar: 
             for it, (image, label) in enumerate(test_loader): 
                 image, label = image.to(device), label.to(device) 
                 with torch.no_grad(): 
-                    out = model(image) # (bsz, vob)
+                    out = model(image) # (bsz, vob) 
                     predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
-                    acc += (predict_y == label).sum().item() / predict_y.size(0)
+                    predict_top_5 = torch.topk(out, dim=1, k=5)[1] 
+                    ece += ece_score(f_softmax(out, dim=1), label)
+                    acc += (predict_y == label).sum().item() / predict_y.size(0) 
+                    acc5 += (predict_top_5 == label.unsqueeze(1)).sum().item() / predict_top_5.size(0) 
+                    
                 pbar.set_postfix(acc=acc / (it + 1))
                 pbar.update() 
                 time_stamp += 1 
                 break 
-        val_acc = acc / time_stamp 
-        acc_list.append(val_acc) 
+        val_acc1 = acc / time_stamp 
+        val_acc5 = acc5 / time_stamp 
+        val_ece = ece / time_stamp 
+
+        acc_1_list.append(val_acc1) 
+        acc_5_list.append(val_acc5)
+        ece_list.append(val_ece)
     
-    print('[ACC] Mean: ', np.mean(acc_list), ' Std: ', np.std(acc_list))
+    print('[ACC-1] Mean: ', np.mean(acc_1_list), ' Std: ', np.std(acc_1_list))
+    print('[ACC-5] Mean: ', np.mean(acc_5_list), ' Std: ', np.std(acc_5_list))
+    print('[ECE] Mean: ', np.mean(ece_list), ' Std: ', np.std(ece_list))
+
+
+
+
 
 
 if __name__ == '__main__': 
