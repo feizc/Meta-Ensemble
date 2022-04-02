@@ -1,3 +1,4 @@
+# linear baseline for parameter prediction 
 import torch 
 from torch import nn 
 from tqdm import tqdm 
@@ -9,7 +10,7 @@ from utils import cifa10_data_load
 from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
 
 # network = {'vgg11', 'resnet50'}
-network = 'resnet50'
+network = 'vgg11'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
 base_epochs = 8 
@@ -148,6 +149,7 @@ def train_base(base_model):
         base_model.train()
         running_loss = 0.0 
         total_part_num = len(train_loader) // 10 
+        val_acc_list = []
         with tqdm(desc='Epoch %d - train' % epoch, unit='it', total=len(train_loader)) as pbar: 
             for it, (image, label) in enumerate(train_loader):
                 image, label = image.to(device), label.to(device) 
@@ -163,12 +165,11 @@ def train_base(base_model):
                 pbar.update() 
                 if few_shot_flag == True: 
                     if it % total_part_num == 0: 
-                        print('Train set partial: ', it // total_part_num) 
-                        print('\n')
-                        valid_base(base_model, test_loader, epoch)
+                        val_acc = simple_valid_base(base_model, test_loader, epoch) 
+                        val_acc_list.append(val_acc)
                 break 
+        print('part val acc:', val_acc_list)
         break
-    
     return base_model.state_dict()
 
 
@@ -189,9 +190,25 @@ def valid_base(base_model, test_loader, epoch=0):
             time_stamp += 1 
             break 
         val_acc = acc / time_stamp
-        print(val_acc) 
-        print('\n')
+    return val_acc 
 
+
+
+def simple_valid_base(base_model, test_loader, epoch=0):
+    acc = .0 
+    time_stamp = 0 
+    base_model.eval() 
+    for it, (image, label) in enumerate(test_loader): 
+        image, label = image.to(device), label.to(device) 
+        with torch.no_grad(): 
+            out = base_model(image) # (bsz, vob)
+            predict_y = torch.max(out, dim=1)[1] #(bsz, ) 
+            acc += (predict_y == label).sum().item() / predict_y.size(0)
+            
+        time_stamp += 1 
+        break 
+    val_acc = acc / time_stamp
+    return val_acc 
 
 
 
