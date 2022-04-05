@@ -24,7 +24,6 @@ class FeedForward(nn.Module):
 
 
 
-
 # module name can not contain "."
 def module_name_refine(module_name): 
     module_name = module_name.split('.')
@@ -32,7 +31,6 @@ def module_name_refine(module_name):
     for seg in module_name: 
         refine_module_name += seg 
     return refine_module_name
-
 
 
 
@@ -214,7 +212,7 @@ class EncoderLayer(nn.Module):
 
 
 # construct the embedding from position, and segment  
-class EPEmbeddings(nn.Module): 
+class TransformerEmbeddings(nn.Module): 
     def __init__(self, max_pos_len=512, type_vocab_size=2, d_model=512):
         super().__init__() 
         self.position_embeddings = nn.Embedding(max_pos_len, d_model) 
@@ -235,11 +233,11 @@ class EPEmbeddings(nn.Module):
 
 
 
-# Transformer for ensemble parameter prediction 
-class EPTransformer(nn.Module): 
+# Original transformer for ensemble parameter prediction 
+class Transformer(nn.Module): 
     def __init__(self, N, padding_idx, size_dict, d_model=512, d_k=64, d_v=64, h=8, d_ff=2048, dropout=.1,
                  identity_map_reordering=False, attention_module=None, attention_module_kwargs=None):
-        super(EPTransformer, self).__init__() 
+        super(Transformer, self).__init__() 
         # self.fc = nn.Linear(3*3*3, d_model) 
         self.fc_dict = nn.ModuleDict() 
         self.inverse_fc_dict = nn.ModuleDict() 
@@ -257,7 +255,7 @@ class EPTransformer(nn.Module):
                                                   attention_module_kwargs=attention_module_kwargs)
                                         for _ in range(N)]) 
         
-        self.embeddings = EPEmbeddings() 
+        self.embeddings = TransformerEmbeddings() 
         self.padding_idx = padding_idx 
 
     def forward(self, input, named_layer): 

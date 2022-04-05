@@ -1,7 +1,7 @@
 import torch 
 from torch import nn
 from torchaudio import transforms 
-from model import EPTransformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50
+from model import Transformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50
 from utils import parameter_dict_combine, weight_size_dict_generate, weight_dict_print 
 from utils import weight_detach, weight_resize_for_model_load 
 from train_meta_linear import train_base 
@@ -36,7 +36,7 @@ def main():
     
     # 2. meta transformer 
     if transformer_version == 'transformer':
-        model = EPTransformer(N=3, padding_idx=0, size_dict=combine_weight_size_dict) 
+        model = Transformer(N=6, padding_idx=0, size_dict=combine_weight_size_dict) 
     else:
         configuration = WeightformerConfig(combine_weight_size_dict) 
         model = Weightformer(configuration)

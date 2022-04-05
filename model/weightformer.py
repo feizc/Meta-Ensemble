@@ -1,7 +1,7 @@
 # WeightFormer for long sequence of weight predition， referred to the framework of huggingface  
 
 import torch 
-from torch import device, nn, Tensor
+from torch import nn, Tensor
 import math 
 from packaging import version
 from .parameter_model import module_name_refine 
@@ -35,7 +35,7 @@ class WeightformerConfig():
     def __init__(
         self, 
         weight_dict,
-        attention_window=4,
+        attention_window=[4, 4, 4, 4, 8, 8], # attention window size can be learned 
         hidden_size=768,
         num_hidden_layers=6,
         num_attention_heads=12,
@@ -44,7 +44,7 @@ class WeightformerConfig():
         hidden_dropout_prob=0.1, 
         attention_probs_dropout_prob=0.1,
         layer_norm_eps=1e-12,
-        type_vocab_size=3,  # # previous, model 1, model 2
+        type_vocab_size=3,  # previous, model 1, model 2
         max_position_embeddings=2048,
         pad_token_id=0,
     ):
@@ -66,7 +66,7 @@ class WeightformerConfig():
 
 
 class WeightformerSelfAttention(nn.Module): 
-    def __init__(self, config, layer_id=0):
+    def __init__(self, config, layer_id):
         super().__init__() 
         self.num_heads = config.num_attention_heads 
         self.head_dim = int(config.hidden_size / self.num_heads) 
@@ -82,6 +82,7 @@ class WeightformerSelfAttention(nn.Module):
         self.value_global = nn.Linear(config.hidden_size, self.embed_dim)
 
         self.dropout = config.attention_probs_dropout_prob 
+
         self.layer_id = layer_id
         attention_window = config.attention_window[self.layer_id]
         assert (
@@ -97,10 +98,9 @@ class WeightformerSelfAttention(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        layer_head_mask=None,
         is_index_masked=None,
         is_index_global_attn=None,
-        is_global_attn=None,
+        is_global_attn=None,   # cross-layer fusion token for first ones 
         output_attentions=False,
     ):
         """
@@ -109,10 +109,11 @@ class WeightformerSelfAttention(nn.Module):
         The *attention_mask* is changed in [`WeightformerModel.forward`] from 0, 1, 2 to:
             - -10000: no attention
             - 0: local attention
-            - +10000: global attention
+            - +10000: global attention for cross-layer fusion 
         """
         hidden_states = hidden_states.transpose(0, 1) 
         seq_len, batch_size, embed_dim = hidden_states.size() 
+
         assert (
             embed_dim == self.embed_dim
         ), f"hidden_states should have embed_dim = {self.embed_dim}, but has {embed_dim}"
@@ -155,12 +156,39 @@ class WeightformerSelfAttention(nn.Module):
             self.one_sided_attn_window_size * 2 + 1,
         ], f"local_attn_probs should be of size ({batch_size}, {seq_len}, {self.num_heads}, {self.one_sided_attn_window_size * 2 + 1}), but is of size {attn_scores.size()}" 
 
-        # we do not incorporate global attention here 
+        if is_global_attn:
+            # compute global attn indices required through out forward fn
+            (
+                max_num_global_attn_indices,
+                is_index_global_attn_nonzero,
+                is_local_index_global_attn_nonzero,
+                is_local_index_no_global_attn_nonzero,
+            ) = self._get_global_attn_indices(is_index_global_attn)
+            # calculate global attn probs from global key
+
+            global_key_attn_scores = self._concat_with_global_key_attn_probs(
+                query_vectors=query_vectors,
+                key_vectors=key_vectors,
+                max_num_global_attn_indices=max_num_global_attn_indices,
+                is_index_global_attn_nonzero=is_index_global_attn_nonzero,
+                is_local_index_global_attn_nonzero=is_local_index_global_attn_nonzero,
+                is_local_index_no_global_attn_nonzero=is_local_index_no_global_attn_nonzero,
+            )
+            # concat to local_attn_probs
+            # (batch_size, seq_len, num_heads, extra attention count + 2*window+1)
+            attn_scores = torch.cat((global_key_attn_scores, attn_scores), dim=-1)
+
+            # free memory
+            del global_key_attn_scores
 
         attn_probs = nn.functional.softmax(
             attn_scores, dim=-1, dtype=torch.float32
         )  # use fp32 for numerical stability  (bsz, seq_len, num_heads, wind*2+1)
         
+        # softmax sometimes inserts NaN if all positions are masked, replace them with 0
+        # attn_probs = torch.masked_fill(attn_probs, is_index_masked[:, :, None, None], 0.0)
+        attn_probs = attn_probs.type_as(attn_scores) 
+
         # free memory
         del attn_scores
         
@@ -168,8 +196,19 @@ class WeightformerSelfAttention(nn.Module):
         attn_probs = nn.functional.dropout(attn_probs, p=self.dropout, training=self.training) 
         value_vectors = value_vectors.view(seq_len, batch_size, self.num_heads, self.head_dim).transpose(0, 1) 
 
-        # compute local attn only 
-        attn_output = self._sliding_chunks_matmul_attn_probs_value(
+        # compute local attention output with global attention value and add
+        if is_global_attn:
+            # compute sum of global and local attn
+            attn_output = self._compute_attn_output_with_global_indices(
+                value_vectors=value_vectors,
+                attn_probs=attn_probs,
+                max_num_global_attn_indices=max_num_global_attn_indices,
+                is_index_global_attn_nonzero=is_index_global_attn_nonzero,
+                is_local_index_global_attn_nonzero=is_local_index_global_attn_nonzero,
+            )
+        else:
+            # compute local attn only
+            attn_output = self._sliding_chunks_matmul_attn_probs_value(
                 attn_probs, value_vectors, self.one_sided_attn_window_size
             )
 
@@ -177,6 +216,7 @@ class WeightformerSelfAttention(nn.Module):
         attn_output = attn_output.transpose(0, 1).reshape(seq_len, batch_size, embed_dim).contiguous() 
 
         outputs = (attn_output.transpose(0, 1),) 
+
         return outputs 
 
 
@@ -385,7 +425,102 @@ class WeightformerSelfAttention(nn.Module):
             total_num_heads, num_chunks, window_overlap, window_overlap + hidden_dim
         )
         chunked_hidden_states = chunked_hidden_states[:, :, :, :-1]
-        return chunked_hidden_states
+        return chunked_hidden_states 
+    
+
+    @staticmethod
+    def _get_global_attn_indices(is_index_global_attn):
+        """compute global attn indices required throughout forward pass"""
+        # helper variable
+        num_global_attn_indices = is_index_global_attn.long().sum(dim=1)
+
+        # max number of global attn indices in batch
+        max_num_global_attn_indices = num_global_attn_indices.max()
+
+        # indices of global attn
+        is_index_global_attn_nonzero = is_index_global_attn.nonzero(as_tuple=True)
+
+        # helper variable
+        is_local_index_global_attn = torch.arange(
+            max_num_global_attn_indices, device=is_index_global_attn.device
+        ) < num_global_attn_indices.unsqueeze(dim=-1)
+
+        # location of the non-padding values within global attention indices
+        is_local_index_global_attn_nonzero = is_local_index_global_attn.nonzero(as_tuple=True)
+
+        # location of the padding values within global attention indices
+        is_local_index_no_global_attn_nonzero = (is_local_index_global_attn == 0).nonzero(as_tuple=True)
+        return (
+            max_num_global_attn_indices,
+            is_index_global_attn_nonzero,
+            is_local_index_global_attn_nonzero,
+            is_local_index_no_global_attn_nonzero,
+        )
+
+    def _concat_with_global_key_attn_probs(
+        self,
+        key_vectors,
+        query_vectors,
+        max_num_global_attn_indices,
+        is_index_global_attn_nonzero,
+        is_local_index_global_attn_nonzero,
+        is_local_index_no_global_attn_nonzero,
+    ):
+        batch_size = key_vectors.shape[0]
+
+        # create only global key vectors
+        key_vectors_only_global = key_vectors.new_zeros(
+            batch_size, max_num_global_attn_indices, self.num_heads, self.head_dim
+        )
+
+        key_vectors_only_global[is_local_index_global_attn_nonzero] = key_vectors[is_index_global_attn_nonzero]
+
+        # (batch_size, seq_len, num_heads, max_num_global_attn_indices)
+        attn_probs_from_global_key = torch.einsum("blhd,bshd->blhs", (query_vectors, key_vectors_only_global))
+
+        attn_probs_from_global_key[
+            is_local_index_no_global_attn_nonzero[0], :, :, is_local_index_no_global_attn_nonzero[1]
+        ] = -10000.0
+
+        return attn_probs_from_global_key 
+    
+
+    def _compute_attn_output_with_global_indices(
+        self,
+        value_vectors,
+        attn_probs,
+        max_num_global_attn_indices,
+        is_index_global_attn_nonzero,
+        is_local_index_global_attn_nonzero,
+    ):
+        batch_size = attn_probs.shape[0]
+
+        # cut local attn probs to global only
+        attn_probs_only_global = attn_probs.narrow(-1, 0, max_num_global_attn_indices)
+        # get value vectors for global only
+        value_vectors_only_global = value_vectors.new_zeros(
+            batch_size, max_num_global_attn_indices, self.num_heads, self.head_dim
+        )
+        value_vectors_only_global[is_local_index_global_attn_nonzero] = value_vectors[is_index_global_attn_nonzero]
+
+        # use `matmul` because `einsum` crashes sometimes with fp16
+        # attn = torch.einsum('blhs,bshd->blhd', (selected_attn_probs, selected_v))
+        # compute attn output only global
+        attn_output_only_global = torch.matmul(
+            attn_probs_only_global.transpose(1, 2).clone(), value_vectors_only_global.transpose(1, 2).clone()
+        ).transpose(1, 2)
+
+        # reshape attn probs
+        attn_probs_without_global = attn_probs.narrow(
+            -1, max_num_global_attn_indices, attn_probs.size(-1) - max_num_global_attn_indices
+        ).contiguous()
+
+        # compute attn output with global
+        attn_output_without_global = self._sliding_chunks_matmul_attn_probs_value(
+            attn_probs_without_global, value_vectors, self.one_sided_attn_window_size
+        )
+        return attn_output_only_global + attn_output_without_global
+
 
 
 
@@ -407,9 +542,9 @@ class WeightformerSelfOutput(nn.Module):
 
 
 class WeightformerAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_id=0):
         super().__init__()
-        self.self = WeightformerSelfAttention(config)
+        self.self = WeightformerSelfAttention(config, layer_id)
         self.output = WeightformerSelfOutput(config)
 
 
@@ -417,7 +552,6 @@ class WeightformerAttention(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        layer_head_mask=None,
         is_index_masked=None,
         is_index_global_attn=None,
         is_global_attn=None,
@@ -426,7 +560,6 @@ class WeightformerAttention(nn.Module):
         self_outputs = self.self(
             hidden_states,
             attention_mask=attention_mask,
-            layer_head_mask=layer_head_mask,
             is_index_masked=is_index_masked,
             is_index_global_attn=is_index_global_attn,
             is_global_attn=is_global_attn,
@@ -468,9 +601,9 @@ class WeightformerOutput(nn.Module):
 
 
 class WeightformerLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_id=0):
         super().__init__()
-        self.attention = WeightformerAttention(config)
+        self.attention = WeightformerAttention(config, layer_id)
         self.intermediate = WeightformerIntermediate(config)
         self.output = WeightformerOutput(config)
         self.seq_len_dim = 1
@@ -479,7 +612,6 @@ class WeightformerLayer(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        layer_head_mask=None,
         is_index_masked=None,
         is_index_global_attn=None,
         is_global_attn=None,
@@ -488,7 +620,6 @@ class WeightformerLayer(nn.Module):
         self_attn_outputs = self.attention(
             hidden_states,
             attention_mask=attention_mask,
-            layer_head_mask=layer_head_mask,
             is_index_masked=is_index_masked,
             is_index_global_attn=is_index_global_attn,
             is_global_attn=is_global_attn,
@@ -508,19 +639,20 @@ class WeightformerEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.layer = nn.ModuleList([WeightformerLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([WeightformerLayer(config, i) for i in range(config.num_hidden_layers)])
         self.gradient_checkpointing = False
 
     def forward(
         self,
         hidden_states,
         attention_mask=None,
+        padding_len=0,
         output_attentions=False,
         output_hidden_states=False,
     ):
 
         is_index_masked = attention_mask < 0
-        is_index_global_attn = attention_mask > 0
+        is_index_global_attn = attention_mask > 0 # this item is for cross-layer attention
         is_global_attn = is_index_global_attn.flatten().any().item()
 
         all_hidden_states = () if output_hidden_states else None
@@ -544,7 +676,6 @@ class WeightformerEncoder(nn.Module):
                     create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,
-                    None,
                     is_index_masked,
                     is_index_global_attn,
                 )
@@ -552,7 +683,6 @@ class WeightformerEncoder(nn.Module):
                 layer_outputs = layer_module(
                     hidden_states,
                     attention_mask=attention_mask,
-                    layer_head_mask=None,
                     is_index_masked=is_index_masked,
                     is_index_global_attn=is_index_global_attn,
                     is_global_attn=is_global_attn,
@@ -572,6 +702,15 @@ class WeightformerEncoder(nn.Module):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
+        # undo padding
+        if padding_len > 0:
+            # unpad `hidden_states` because the calling function is expecting a length == input_ids.size(1)
+            hidden_states = hidden_states[:, :-padding_len]
+            if output_hidden_states:
+                all_hidden_states = tuple([state[:, :-padding_len] for state in all_hidden_states])
+
+            if output_attentions:
+                all_attentions = tuple([state[:, :, :-padding_len, :] for state in all_attentions])
         
         return (
             hidden_states,
@@ -671,7 +810,7 @@ class Weightformer(nn.Module):
         named_layer, 
         attention_mask=None, 
         global_attention_mask=None,
-        weight_type_ids=None,
+        weight_type_ids=None, # model id for different base models 
         position_ids=None,
     ): 
         # initialize local attention 
@@ -786,30 +925,26 @@ class Weightformer(nn.Module):
 
 
 
-
-
-
-
-
-
-
 if __name__ == '__main__': 
-    configuration = WeightformerConfig() 
+    configuration = WeightformerConfig(None) 
     #print(configuration.hidden_size) 
-    #wm = WeightformerSelfAttention(configuration) 
-    #wma = WeightformerAttention(configuration)
-    #wl = WeightformerLayer(configuration)
-    #we = WeightformerEncoder(configuration) 
-    wf = Weightformer(configuration)
+    wm = WeightformerSelfAttention(configuration, layer_id=0) 
+    wma = WeightformerAttention(configuration)
+    wl = WeightformerLayer(configuration)
+    we = WeightformerEncoder(configuration) 
+    # wf = Weightformer(configuration)
 
-    input = torch.randn(2, 24, 576) 
-    attention_mask = torch.ones(2, 24)
-    o = wf(input) 
-    print(o.size())
-    #wm(input, attention_mask) 
-    #wma(input, attention_mask) 
-    #wl(input, attention_mask)
-    #o = we(input, attention_mask)
+    input = torch.randn(2, 24, 768) 
+    attention_mask = torch.zeros(2, 24) 
+    attention_mask[:, 0] = 1000 
+    attention_mask[:, -1] = -1000 
+
+    # o = wf(input) 
+    # print(o.size())
+    wm(input, attention_mask) 
+    wma(input, attention_mask) 
+    wl(input, attention_mask)
+    o = we(input, attention_mask)
     
 
 
