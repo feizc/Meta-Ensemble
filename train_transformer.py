@@ -1,15 +1,14 @@
 import torch 
-from torch import nn
-from torchaudio import transforms 
-from model import Transformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50
+from torch import nn 
+from model import Transformer, Weightformer, WeightformerConfig, vgg11_bn, resnet50, Maskformer, MaskformerConfig 
 from utils import parameter_dict_combine, weight_size_dict_generate, weight_dict_print 
 from utils import weight_detach, weight_resize_for_model_load 
 from train_meta_linear import train_base 
 from net_parameter import vgg11_predict_layers, resnet50_predict_layers 
 
 
-# version = {'transformer', 'weightformer'} -> original transfor or weightformer 
-transformer_version = 'weightformer'
+# version = {'transformer', 'weightformer', 'maskformer'} -> original transfor or weightformer or maskformer
+transformer_version = 'maskformer'
 network = 'resnet50'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu") 
 meta_epochs = 200
@@ -37,9 +36,12 @@ def main():
     # 2. meta transformer 
     if transformer_version == 'transformer':
         model = Transformer(N=6, padding_idx=0, size_dict=combine_weight_size_dict) 
-    else:
+    elif transformer_version == 'weighgtformer':
         configuration = WeightformerConfig(combine_weight_size_dict) 
-        model = Weightformer(configuration)
+        model = Weightformer(configuration) 
+    else:
+        configuration = MaskformerConfig(combine_weight_size_dict) 
+        model = Maskformer(configuration)
     model = model.to(device) 
     if network == 'vgg11': 
         base_model = vgg11_bn() 
