@@ -1,6 +1,8 @@
 import torch 
 import torch.nn as nn 
 from .parameter_model import EncoderLayer, module_name_refine, TransformerEmbeddings 
+from torch.nn import functional as F 
+
 
 
 class MaskformerConfig(): 
@@ -47,6 +49,7 @@ class Maskformer(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings 
         self.mask_prob = config.mask_prob 
         self.weight_dict = config.weight_dict 
+        self.padding_idx = 0
 
         self.fc_dict = nn.ModuleDict() 
         self.inverse_fc_dict = nn.ModuleDict() 
@@ -70,14 +73,21 @@ class Maskformer(nn.Module):
         self.learn_mask_attention = nn.Embedding(self.max_position_embeddings*self.max_position_embeddings, 1) 
         self.sigmoid = nn.Sigmoid() 
     
-    def forward(self, input_weight, named_layer): 
+    def forward(self, input_weight, named_layer):  
+        out = self.fc_dict[module_name_refine(named_layer)](input_weight) 
+        out = F.relu(out) 
+        out = self.embeddings(out)
+        out = self.dropout(out) 
+        out = self.layer_norm(out)  
+
         device = input_weight.device 
         input_weight = self.fc_dict[module_name_refine(named_layer)](input_weight) 
-        input_shape = input_weight.size()[:-1]  # (bsz, seq_len)
+        bsz, seq_len = input_weight.size()[:-1]  # (bsz, seq_len)
         
         mask_attention_len = self.max_position_embeddings 
         learn_mask = self.learn_mask_attention.weight.reshape(mask_attention_len, mask_attention_len) 
         learn_mask = self.sigmoid(learn_mask) 
+        # current weight token can see itself 
         diag_mask = torch.diag(torch.ones(mask_attention_len)).to(device) 
         weight_attention = (1. - diag_mask) * learn_mask 
         learn_mask = diag_mask + weight_attention 
@@ -87,8 +97,29 @@ class Maskformer(nn.Module):
             learn_mask = learn_mask.to(device) 
             learn_mask.requires_grad = False 
         
-        print(learn_mask.size())
+        learn_mask = learn_mask[:seq_len, :seq_len].unsqueeze(0).repeat(bsz, 1, 1) # (bsz, 1, seq, seq)
+        attention_mask = learn_mask.unsqueeze(1)
+        
+        for l in self.transforms:
+            out = l(out, out, out, attention_mask)
+            # outs.append(out.unsqueeze(1))
+        seq_len = out.size()[1]//2 
+        out = out[:, :seq_len, :]  # (bsz, n_o, d_in)
+        # outs = torch.cat(outs, 1) # (b_s, encoder layer, seq_len, d_in) 
+        
+        out = self.inverse_fc_dict[module_name_refine(named_layer)](out) # (bsz, n_o, k*k*n_i) 
+        return out  
 
+
+    def get_mask_loss(self, attention_mask): 
+        mask_loss = 0 
+        mask_loss += (torch.mean(torch.abs(attention_mask))) 
+        return mask_loss 
+
+
+    def freeze_backbone(self, freeze=True): 
+        for _, p in self.transforms.named_parameters(): 
+            p.requires_grad = not freeze 
 
 
 

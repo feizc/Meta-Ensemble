@@ -99,13 +99,14 @@ class ScaledDotProductAttention(nn.Module):
         :param attention_weights: Multiplicative weights for attention values (b_s, h, nq, nk).
         :return:
         '''
+        
         b_s, nq = queries.shape[:2]
         nk = keys.shape[1]
         q = self.fc_q(queries).view(b_s, nq, self.h, self.d_k).permute(0, 2, 1, 3)  # (b_s, h, nq, d_k)
         k = self.fc_k(keys).view(b_s, nk, self.h, self.d_k).permute(0, 2, 3, 1)  # (b_s, h, d_k, nk)
         v = self.fc_v(values).view(b_s, nk, self.h, self.d_v).permute(0, 2, 1, 3)  # (b_s, h, nk, d_v)
 
-        att = torch.matmul(q, k) / np.sqrt(self.d_k)  # (b_s, h, nq, nk)
+        att = torch.matmul(q, k) / np.sqrt(self.d_k)  # (b_s, h=8, seq, seq,) 
         if attention_weights is not None:
             att = att * attention_weights
         if attention_mask is not None:
