@@ -22,7 +22,9 @@ class MaskformerConfig():
         max_position_embeddings=2048,
         pad_token_id=0,
         mask_prob=0.7, 
-        mask_soft2hard=True
+        mask_soft2hard=True, 
+        shift_flag=False, 
+        shift_step=1, # shift step for consistency loss
     ):
         self.weight_dict = weight_dict
         self.hidden_size = hidden_size
@@ -38,6 +40,9 @@ class MaskformerConfig():
         self.pad_token_id = pad_token_id 
         self.mask_prob = mask_prob 
         self.mask_soft2hard = mask_soft2hard 
+        self.shift_flag = shift_flag 
+        self.shift_step = shift_step 
+
 
 
 
@@ -72,6 +77,7 @@ class Maskformer(nn.Module):
         self.mask_soft2hard = config.mask_soft2hard 
         self.learn_mask_attention = nn.Embedding(self.max_position_embeddings*self.max_position_embeddings, 1) 
         self.sigmoid = nn.Sigmoid() 
+        self.mse_loss = nn.MSELoss()
     
     def forward(self, input_weight, named_layer):  
         out = self.fc_dict[module_name_refine(named_layer)](input_weight) 
@@ -97,24 +103,46 @@ class Maskformer(nn.Module):
             learn_mask = learn_mask.to(device) 
             learn_mask.requires_grad = False 
         
-        learn_mask = learn_mask[:seq_len, :seq_len].unsqueeze(0).repeat(bsz, 1, 1) # (bsz, 1, seq, seq)
-        attention_mask = learn_mask.unsqueeze(1)
+        cut_learn_mask = learn_mask[:seq_len, :seq_len].unsqueeze(0).repeat(bsz, 1, 1) # (bsz, 1, seq, seq)
+        attention_mask = cut_learn_mask.unsqueeze(1)
         
+        if self.config.shift_flag == True: 
+            combine_learn_mask = torch.cat([learn_mask, learn_mask], dim=0) 
+            shift_cut_learn_mask = combine_learn_mask[self.config.shift_step: seq_len+self.config.shift_step, :seq_len].unsqueeze(0).repeat(bsz, 1, 1) 
+            shift_attention_mask = shift_cut_learn_mask.unsqueeze(1) 
+
+            shift_out = out 
+            for l in self.transforms:
+                shift_out = l(shift_out, shift_out, shift_out, shift_attention_mask)
+            out_len = shift_out.size()[1]//2 
+            shift_out = shift_out[:, :out_len, :] 
+            shift_out = self.inverse_fc_dict[module_name_refine(named_layer)](shift_out)
+
         for l in self.transforms:
             out = l(out, out, out, attention_mask)
             # outs.append(out.unsqueeze(1))
-        seq_len = out.size()[1]//2 
-        out = out[:, :seq_len, :]  # (bsz, n_o, d_in)
+        out_len = out.size()[1]//2 
+        out = out[:, :out_len, :]  # (bsz, n_o, d_in)
         # outs = torch.cat(outs, 1) # (b_s, encoder layer, seq_len, d_in) 
         
         out = self.inverse_fc_dict[module_name_refine(named_layer)](out) # (bsz, n_o, k*k*n_i) 
-        return out  
+
+        if self.config.shift_flag == True: 
+            return (out, shift_out)
+        else:
+            return out  
 
 
     def get_mask_loss(self, attention_mask): 
         mask_loss = 0 
         mask_loss += (torch.mean(torch.abs(attention_mask))) 
         return mask_loss 
+
+
+    def get_shift_consistency_loss(self, out, shift_out): 
+        shift_loss = 0 
+        shift_loss += self.mse_loss(out, shift_out) 
+        return shift_loss 
 
 
     def freeze_backbone(self, freeze=True): 
