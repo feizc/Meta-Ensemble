@@ -1,4 +1,4 @@
-# Meta Ensemble Parameter Learning
+# Meta-Ensemble Parameter Learning
  
 We introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of ensemble distillation model based on the parameters of base learners as well as small part of training dataset.  
 
