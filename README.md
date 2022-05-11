@@ -24,4 +24,5 @@ We support the image classification datasets: CIFAR-10, CIFAR-100, and ImageNet 
 
 ## 🙌 Training 
 
-training script.
+Training scripts for different scenarios. 
+
