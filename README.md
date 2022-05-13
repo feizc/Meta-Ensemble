@@ -18,7 +18,7 @@ We introduce a new task, referred to **meta ensemble parameter learning**, which
 
 ## ⚙  Dataset 
 
-We support the image classification datasets: CIFAR-10, CIFAR-100, and ImageNet for performance evaluation. 
+We support the image classification datasets: CIFAR-10, CIFAR-100, and ImageNet, for performance evaluation. Please the datasets in the path data/ or specify with argparse.  
 
 
 
