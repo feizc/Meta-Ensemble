@@ -32,5 +32,12 @@ All the training scripts are in the folder `./scripts` and Run `python script_na
 
 | Scripts      | Scenarios |
 |--------------|-----------|
-|              |           |
+| train_vgg.py |  train single vggnet-11  | 
+| train_resnet.py | train single resnet-50 | 
+| train_distillation.py | average knowledge distillation for model ensemble |
+| train_mlp.py | mlp network for weight generation | 
+| train_transformer.py | WeightFormer for weight generation | 
+
+
+
 
