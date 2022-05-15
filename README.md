@@ -1,8 +1,13 @@
 # Meta-Ensemble Parameter Learning
- 
-We introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of ensemble distillation model based on the parameters of base learners as well as small part of training dataset.  
+
+This is the PyTorch implementation for inference and training of the weightformer network as described in: 
+> **Meta-Ensemble Parameter Learning** 
+
+In between, we introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of ensemble distillation model based on the parameters of base learners as well as small part of training dataset.  
 
 ## 🔥  WeightFormer
+
+we introduce WeightFormer, a model to directly predict the distilled student model parameters. Our architecture takes inspiration from the Transformer and incorporates three key novelties to imitate the characteristics of model ensemble, i.e., cross-layer information flow, learnable attention mask and shift consistency limitation. 
 
 <p align="center">
      <img src="https://github.com/feizc/Meta-Ensemble/blob/main/images/frame_weightformer.jpg" alt="Weightformer Architecture">
