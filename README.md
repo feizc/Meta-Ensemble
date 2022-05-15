@@ -7,7 +7,7 @@ In between, we introduce a new task, referred to **meta ensemble parameter learn
 
 ## 🔥  WeightFormer
 
-we introduce WeightFormer, a model to directly predict the distilled student model parameters. Our architecture takes inspiration from the Transformer and incorporates three key novelties to imitate the characteristics of model ensemble, i.e., cross-layer information flow, learnable attention mask and shift consistency limitation. 
+We introduce WeightFormer, a model to directly predict the distilled student model parameters. Our architecture takes inspiration from the Transformer and incorporates three key novelties to imitate the characteristics of model ensemble, i.e., cross-layer information flow, learnable attention mask and shift consistency limitation. 
 
 <p align="center">
      <img src="https://github.com/feizc/Meta-Ensemble/blob/main/images/frame_weightformer.jpg" alt="Weightformer Architecture">
@@ -19,15 +19,18 @@ we introduce WeightFormer, a model to directly predict the distilled student mod
 </p>
 
 
-
-
 ## ⚙  Dataset 
 
-We support the image classification datasets: CIFAR-10, CIFAR-100, and ImageNet, for performance evaluation. Please the datasets in the file path data/ or specify with argparse.  
-
+We support the image classification datasets: [CIFAR-10](https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz), [CIFAR-100](https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz), and [ImageNet](http://image-net.org), for performance evaluation. Please download the corresponding datasets and put them in the file path data/ or specify with argparse.  
 
 
 ## 🙌 Training 
 
-Training scripts for different scenarios. 
+Training scripts for different training scenarios. 
+
+All the training scripts are in the folder `./scripts` and Run `python script_name.py`
+
+| Scripts      | Scenarios |
+|--------------|-----------|
+|              |           |
 
