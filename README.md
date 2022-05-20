@@ -5,7 +5,7 @@ This is the PyTorch implementation for inference and training of the weightforme
 
 In between, we introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of ensemble distillation model based on the parameters of base learners as well as small part of training dataset.  
 
-</br>
+
 
 ## 🔥  WeightFormer
 
@@ -20,7 +20,7 @@ We introduce WeightFormer, a model to directly predict the distilled student mod
     </em></sub>
 </p>
 
-</br>
+
 
 ## ⚙  Dataset and Model
 
@@ -28,7 +28,7 @@ We support the image classification datasets: [CIFAR-10](https://www.cs.toronto.
 
 The trained checkpoints for WeighFormer will be available at Googledrive. 
 
-</br> 
+
 
 
 ## 🙌 Training 
@@ -45,7 +45,7 @@ All the training scripts are in the folder `./scripts` and run `python script_na
 | train_mlp.py | mlp network for weight generation | 
 | train_transformer.py | WeightFormer for weight generation | 
 
-</br>  
+
 
 For help or issues related to this package, please submit a GitHub issue. 
 
