@@ -3,7 +3,7 @@
 This is the PyTorch implementation for inference and training of the weightformer network as described in: 
 > **Meta-Ensemble Parameter Learning** 
 
-In between, we introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of ensemble distillation model based on the parameters of base learners as well as small part of training dataset.  
+In between, we introduce a new task, referred to **meta ensemble parameter learning**, which aims to directly predict the parameters of knowledge distillation model based on the parameters of base learners as well as small part of training dataset.  
 
 
 
